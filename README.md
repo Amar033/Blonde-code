@@ -8,3 +8,26 @@ I am trying to build this project from scratch with the agent runtime and the al
 So, From scratch i plan to have a proper plan and step by step create this project so that i can build this system and apply it as well in almost all developer use case, and i also plan to use some other methods for the local modal running in system and having atleast half the capabilty of the online models that we can call via apis.
 
 Thank you for reading till now, from today i will start coding for this project!
+
+
+Currently I iterated on plan and chose typescript as the base language even though I am not good at this.
+Why not?, It will be fun. (I have no idea)
+So all the process in the agent runtime is based on events  and also a lot of tooling and format issues may arise so, I THINK, typescript is a good choice? Correct me if i am wrong.
+
+So currently planning the project and i have decided on the setup to be done on node, and MAYBE try bun in the future (I am currently just shouting buzzwords at this point)
+
+The llm layer of the project will be built using already existing ai sdks but i plan to setup my own service layer for the llms so that i can switch between multiple providers and even with local models.
+
+The project is setup as:
+
+Blonde
+|-scr 
+  |-planner (llm portion)
+  |-runtime (agent runtime)
+  |-tools (mcp tools or any tools that the application may require)
+  |-types (all ts definitions)
+  |-ui (TUI portion)
+|-main.ts (entry point)
+
+I am unsure if i should start with the design of the tui for better understanding of the input and output or to be just focused on the backend for now.
+
