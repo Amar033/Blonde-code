@@ -1,11 +1,17 @@
+import type {Plan, Observation} from './agent.ts'
+
+
 // Events represent things that happen to the agent 
 // Events cause state transitions
 
 export type AgentEvent = 
   | {type: 'user_input'; input: string}
+  | {type: 'plan_generated'; plan: Plan}
   | {type: 'llm_response'; content: string; parsed: PlannerResponse}
+  | {type: 'tool_validated'; valid: boolean; reason?: string}
   | {type: 'tool_result'; toolName: string; result: unknown}
   | {type: 'tool_error'; toolName: string; error: string}
+  | {type: 'observation_ready'; observation: Observation}
   | {type: 'user_approval'; approved: boolean}
   | {type: 'abort'; reason: string}
   | {type: 'complete'; finalResponse: string};
