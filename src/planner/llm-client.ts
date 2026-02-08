@@ -1,6 +1,6 @@
 import type {LLMProvider, LLMCallOptions, LLMResponse} from './providers/base.js';
 import type {PlanenrResponse } from '../types/events.js';
-import {OpeenRouterProvider} from './providers/openrouter.js';
+import {OpenRouterProvider} from './providers/openrouter.js';
 
 /**
  * LLM Client 
@@ -23,7 +23,7 @@ export class LLMClient{
       throw new Error('OPENROUTER_API_KEY not set in .env');
     }
 
-    const provider = new OpeenRouterProvider(apikey,model);
+    const provider = new OpenRouterProvider(apikey,model);
 
     //verification
     const available =  await provider.isAvailable();
@@ -66,7 +66,7 @@ export class LLMClient{
   async finalize(plan: string, observations: string[]): Promise<PlannerResponse> {
     const prompt = `Plan : ${plan}
         Observations:
-          ${observations.map((o,i)=> `${i+1}. ${o}`.join('\n')}
+          ${observations.map((o,i)=> `${i+1}. ${o}`).join('\n')}
         Summarize what was accomplished.`;
 
   const response = await this.provider.call(prompt,{
@@ -85,8 +85,8 @@ export class LLMClient{
       const parsed = JSON.parse(cleaned);
 
       //validates it and match with PlanenrResponseSchema
-      if (!parse.type){
-        throw new Error {'Missing type field'}
+      if (!parsed.type){
+        throw new Error ('Missing type field');
       }
 
       return parsed as PlannerResponse;        

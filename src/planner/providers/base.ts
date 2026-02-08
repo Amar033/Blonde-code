@@ -8,7 +8,7 @@ import type (PlannerResponse) from '../../types/event.js'
  * Another plan is to make the project (blonde-code) to also act as an llm hosting service on its own which can run on the cpu simillar to llama.cpp, i havent planned on this portion so thats all i have in mind.
  */
 
-export inference LLMProvider {
+export interface LLMProvider {
   // provider name (mainly for logging)
   name: string;
   
@@ -16,7 +16,7 @@ export inference LLMProvider {
   call (prompt:string, options?:LLMCallOptions):Promise<LLMResponse>;
   
   // check if provider is available 
-  isAvailable(); Promise<boolean>;
+  isAvailable(): Promise<boolean>;
 }
 
 //options for llm LLMCalls

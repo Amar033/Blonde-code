@@ -95,13 +95,13 @@ export class AgentRuntime {
     this.emit(event);
 
     // transition to planning 
-    this.state = {status: 'planning', thought: input , turn 1};
+    this.state = {status: 'planning', thought: input , turn:  1};
 
     // LLMCall 
     console.log(`Calling llm in plan mode`);
     const planResponse = await this.llmClient.plan(input);
 
-    const.log(`LLM Response`, planResponse);
+    console.log(`LLM Response`, planResponse);
 
     // for now just the plan, but in time i will add the functionality to use the plan to enable acting phase
     const finalAnswer = planResponse.type === 'plan'
