@@ -31,3 +31,9 @@ Blonde
 
 I am unsure if i should start with the design of the tui for better understanding of the input and output or to be just focused on the backend for now.
 
+
+#### Date: Feb 8th 2026
+Currently we have plan mode integrated into the application and also openrouter provider is added, and it is served via http, not any sdks, i hope this is not a bad choice, the change from sdk to raw http was because sdk seems to fail for some reason and this seemed better approach in the long run.
+Lets see where this takes us.
+Now the next step is to have plan|act|observe architecture and add some tools as well!
+
