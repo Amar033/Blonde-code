@@ -3,7 +3,7 @@
 import type {AgentState, Plan} from '../types/agent.js'
 import type {AgentEvent, PlannerResponse} from '../types/events.js'
 import {isState, isTerminal} from '../types/agent.js'
-
+import {LLMClient} from '../planner/llm-client.js'
 
 // runtime configuration (global configuration for the runtime to prevebnt infinite loops and max iterations)
 export interface RuntimeConfig{
@@ -21,6 +21,8 @@ export class AgentRuntime {
   private state: AgentState;
   private config: RuntimeConfig;
   private eventListeners: ((event: AgentEvent)=> void)[] = [];
+  private llmClient? : LLMClient;
+
 
   constructor(config: Partial<RuntimeConfig> = {}){
     this.state = { status: 'waiting_for_input'};
@@ -49,8 +51,14 @@ export class AgentRuntime {
     this.eventListeners.forEach(listener => listener(event));
   }
 
+  async initialize(): Promise<void> {
+    this.llmClient = await LLMClient.fromEnv();
+  }
+
   // mamin execution loop, an async generatror that yields events as they happen.  Currently simple flow and it can be updated to have PLAN/ACT/OBSERVE
-  async *run(input:string): AsyncGenerator<AgentEvent> {
+  /** 
+   * Previous pseudocode, kept as legacy
+   * async *run(input:string): AsyncGenerator<AgentEvent> {
     // start with input from user
     const event: AgentEvent = {type: 'user_input', input};
     yield event;
@@ -75,6 +83,43 @@ export class AgentRuntime {
     yield completeEvent;
     this.emit(completeEvent);
   }
+*/
+  async *run(input: string): AsyncGenerator<AgentEvent>{
+    if (!this.llmClient){
+      throw new Error('Runtime not initialized. Call initialized() first.');
+    }
+
+    // input from the user 
+    const event: AgentEvent = {type: 'user_input', input};
+    yield event;
+    this.emit(event);
+
+    // transition to planning 
+    this.state = {status: 'planning', thought: input , turn:  1};
+
+    // LLMCall 
+    console.log(`Calling llm in plan mode`);
+    const planResponse = await this.llmClient.plan(input);
+
+    console.log(`LLM Response`, planResponse);
+
+    // for now just the plan, but in time i will add the functionality to use the plan to enable acting phase
+    const finalAnswer = planResponse.type === 'plan'
+      ? `Plan created: \n${planResponse.steps.join('\n')}\n\nReasoning: ${planResponse.reasoning}`
+      : planResponse.type === 'answer'
+      ? planResponse.content
+      : 'Unable to create plan';
+
+    this.state = {status: 'completed', finalAnswer, turn: 1};
+    const completeEvent: AgentEvent ={
+      type: 'complete',
+      finalResponse: finalAnswer
+    };
+    yield completeEvent;
+    this.emit(completeEvent);
+  }
+  
+
 
   // process single evnt and transition state
   // [where the state machine log lives]eg: state->event->newstate

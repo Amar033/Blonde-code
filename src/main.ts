@@ -1,6 +1,10 @@
 // main entry point
 
 import {AgentRuntime} from './runtime/core.js'
+import dotenv from 'dotenv';
+
+// Load environment variables
+dotenv.config();
 
 async function main() {
   console.log('Blonde Code - Starting...\n');
@@ -8,6 +12,10 @@ async function main() {
     maxTurns: 10,
     debug: true,
   });
+
+  // initialize llm client
+  await runtime.initialize();
+  
   runtime.onEvent((event)=>{
     console.log(`[${event.type}]`, event);
   });
