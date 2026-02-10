@@ -36,24 +36,40 @@ export class ReadFileTool extends BaseTool{
     }
   }
 
+  private isBlockedPath(path:string): boolean{
+    const blocked = ['node_modules','.git','dist','.next','build'];
+    return blocked.some(dir=>path.includes(dir));
+  } 
+
   async execute(args: unknown): Promise<ToolResult> {
     const startTime = Date.now();
-    const {path, startLine, endLine} = args as {path: string; startLine?: number, endline?: number;};
+    const {path, startLine, endLine} = args as {path: string; startLine?: number; endLine?: number; maxBytes?: number;};
+    //path validation
+    if (this.isBlockedPath(path)){
+      return {
+        success: false,
+        output: null,
+        error: `BlockedPath: ${path}`,
+      };
+    }
 
     try{
       const content = await fs.readFile(path,'utf-8');
       const lines = content.split('\n');
 
-      const start = (startline || 1) -1;
-      const end   endLines ||lines.length;
-      const selectedLines = lines.slice.
+      const start = (startLine || 1) -1;
+      const end  = endLine ||lines.length;
+      const selectedLines = lines.slice(start,end);
       const duration = Date.now() - startTime;
 
       return {
         success: true,
         output: {
           path,
-          content,
+          content: selectedLines.join('\n'),
+          totalLines: lines.length,
+          rangeStart: startLine || 1,
+          rangeEnd: endLine || lines.length,
           size: content.length,
         },
         metadata: {duration},
@@ -63,7 +79,7 @@ export class ReadFileTool extends BaseTool{
           success: false,
           output: null,
           error: `Failed to read file: ${error}`,
-      };
+      };}
     }
   }
 }
