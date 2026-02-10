@@ -4,12 +4,19 @@ import type {AgentState, Plan} from '../types/agent.js'
 import type {AgentEvent, PlannerResponse} from '../types/events.js'
 import {isState, isTerminal} from '../types/agent.js'
 import {LLMClient} from '../planner/llm-client.js'
-
+import {PlanningStrategy} from '../runtime/strategies/planning-strategy.js'
 // runtime configuration (global configuration for the runtime to prevebnt infinite loops and max iterations)
 export interface RuntimeConfig{
   maxTurns: number;
   maxLoopCount: number;
   debug: boolean;
+}
+
+export interface ExecutionSafety{
+  validateToolCall(call: ToolCall): ValidationResult;
+  requiresApproval(call: ToolCall): boolean;
+  canAbort(): boolean;
+  recordAction(action:Action): void; // for audit
 }
 
 // agent runtime, the core event loop
@@ -20,6 +27,7 @@ export interface RuntimeConfig{
 export class AgentRuntime {
   private state: AgentState;
   private config: RuntimeConfig;
+  private planningStrategy: PlanningStrategy;
   private eventListeners: ((event: AgentEvent)=> void)[] = [];
   private llmClient? : LLMClient;
 
