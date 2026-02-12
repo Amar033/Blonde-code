@@ -1,5 +1,6 @@
 import type {Tool} from './base.js';
 import {ReadFileTool} from './file-read.js';
+impory {ListFileTool} from './list-files.ts';
 
 // central registry of all built in tools, agent runtime can see all tools by name here
 
@@ -10,6 +11,7 @@ export class ToolRegistry {
   constructor(){
     // register available tools
     this.register(new ReadFileTool());
+    this.register(new ListFileTool());
   }
 
   register (tool: Tool): void {
