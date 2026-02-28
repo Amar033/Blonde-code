@@ -150,7 +150,7 @@ export class AgentRuntime {
         reason: this.state.reason
       };
       yield abortEvent;
-      this.emit)abortEvent;
+      this.emit(abortEvent);
     }
    // this.state = {status: 'planning', thought: input , turn:  1};
 
@@ -324,8 +324,7 @@ export class AgentRuntime {
             turn
           };
           break;
-        } else if (response.type === 'tool_ca// need to implement approval flow as well for tools that requires them.
- ll'){
+        } else if (response.type === 'tool_call'){
           const toolCall: ToolCall={
             name: response.tool,
             args: response.args,
@@ -333,7 +332,7 @@ export class AgentRuntime {
             reasoning: response.reasoning,
           };
 
-          console.log(`[Runtime] Tool Call: ${toolCall.name}(${JSON.stringify(toolCall.args})`);
+          console.log(`[Runtime] Tool Call: ${toolCall.name}(${JSON.stringify(toolCall.args)})`);
 
           // validation and execution
           const observation = await this.executeToolCall(toolCall, plan, observations, turn);

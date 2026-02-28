@@ -61,7 +61,7 @@ export abstract class BaseTool implements Tool{
       };
     }
 
-    const errors string[] = [];
+    const errors: string[] = [];
     const required = this.argsSchema.required || [];
 
     for (const field of required){
