@@ -1,18 +1,18 @@
 import type {Tool} from './base.js';
 import {ReadFileTool} from './file-read.js';
-impory {ListFileTool} from './list-files.ts';
+import {ListFileTool} from './list-files.js';
 
-// central registry of all built in tools, agent runtime can see all tools by name here
+// central regitry of all built in tools, agent runtime can see all tools by name here
 
 
 export class ToolRegistry {
   private tools = new Map<string, Tool>();
 
-  constructor(){
-    // register available tools
-    this.register(new ReadFileTool());
-    this.register(new ListFileTool());
-  }
+ // constructor(){
+ //   // register available tools
+ //   this.register(new ReadFileTool());
+ //   this.register(new ListFileTool());
+ // }
 
   register (tool: Tool): void {
     if (this.tools.has(tool.name)){
@@ -23,7 +23,11 @@ export class ToolRegistry {
 
   // get  tool by name 
   get(name:string): Tool | undefined {
-    return this.tool.get(name);
+    return this.tools.get(name);
+  }
+  
+  getAllTools(): Tool[] {
+    return Array.from(this.tools.values());
   }
 
   // list all available

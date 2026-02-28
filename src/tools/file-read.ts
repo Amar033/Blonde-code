@@ -79,7 +79,8 @@ export class ReadFileTool extends BaseTool{
           success: false,
           output: null,
           error: `Failed to read file: ${error}`,
-      };}
+      };
     }
   }
 }
+
