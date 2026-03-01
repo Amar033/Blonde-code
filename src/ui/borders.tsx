@@ -25,6 +25,10 @@ const App=()=>{
       <Box marginTop={1} borderStyle="double" borderColor="#FF1493" paddingX={2} paddingY={1}>
         <Text bold color="cyan">Styled box with custom color</Text>
       </Box>
+
+     <Box borderStyle="round" backgroundColor="grey" borderColor="grey">
+      <Text bold color="white">Styled box with custom color</Text>
+    </Box> 
   </Box>
   );
 };
