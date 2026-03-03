@@ -112,16 +112,40 @@ export class LLMClient{
   }
 
   // format the tools for llm 
-  private formatToolsForLLM(tools: Tool[]): string {
-    return tools.map(tool=>{
-      const args = tool.argSchema.properties ?
-        Object.entries(tool.argsSchema.properties).map(([name,schema]:[string,any])=> ` - ${name}: ${schema.description || schema.type}`).join('\n'): ' (no arguments)';
-      const danger = tool.isDangerous ? 'DANGEROUS' : '';
-      return `Tool: ${tool.name}${danger} 
-              Description: ${tool.description}
-              Arguments: ${args}`.trimn();
-    }).join('\n\n---\n\n');
-  }
+private formatToolsForLLM(tools: Tool[]): string {
+  const formattedTools = tools.map(tool => {
+    // Build arguments list
+    let argsList = '';
+    
+    if (tool.argsSchema?.properties) {
+      const entries = Object.entries(tool.argsSchema.properties);
+      argsList = entries
+        .map(([name, schema]: [string, any]) => {
+          const desc = schema.description || schema.type || 'unknown';
+          return `  - ${name}: ${desc}`;
+        })
+        .join('\n');
+    } else {
+      argsList = '  (no arguments)';
+    }
+    
+    const dangerWarning = tool.isDangerous ? ' ⚠️ DANGEROUS' : '';
+    const approvalNote = tool.requiresApproval ? 'Yes' : 'No';
+    
+    // Build the complete tool description
+    const lines = [
+      `Tool: ${tool.name}${dangerWarning}`,
+      `Description: ${tool.description}`,
+      'Arguments:',
+      argsList,
+      `Requires Approval: ${approvalNote}`
+    ];
+    
+    return lines.join('\n');
+  });
+  
+  return formattedTools.join('\n\n---\n\n');
+} 
 
   // parse llm response => PlanenrResponse (handles the off chance that the llm returns garbage)
   private parseResponse(content: string): PlannerResponse{
