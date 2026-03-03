@@ -3,7 +3,7 @@ import {BaseTool,ToolResult,FakeRunResult} from './base.js';
 
 
 // tool for listing files
-export class ListFileTool extends BaseTool{
+export class ListFilesTool extends BaseTool{
   name= 'list_files';
   description = 'List files in a directory';
 
