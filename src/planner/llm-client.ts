@@ -1,6 +1,7 @@
 import type {LLMProvider, LLMCallOptions, LLMResponse} from './providers/base.js';
 import type {PlanenrResponse } from '../types/events.js';
 import {OpenRouterProvider} from './providers/openrouter.js';
+import {OllamaProvider} from './providers/ollama.js';
 import {Tool} from '../tools/base.js';
 /**
  * LLM Client 
@@ -15,16 +16,28 @@ export class LLMClient{
 
   // create client from environment
   static async fromEnv(): Promise<LLMClient> {
-    const providerName = process.env.LLMProvider || 'openrouter';
+    const providerName = process.env.LLMProvider || 'ollama';
     const apikey = process.env.OPENROUTER_API_KEY;
-    const model = process.env.LLM_MODEL;
+    const model = process.env.LLM_MODEL || 'qwen3.5:latest';
+    
+    if (providerName === 'ollama') {
+      const baseURL = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
+      const provider = new OllamaProvider(model, baseURL);
+    
+      const available = await provider.isAvailable();
+      if (!available) {
+        throw new Error('Ollama server not running. Start it with: ollama serve');
+      }
+      console.log(`[LLM] Initialized with Ollama: ${model}`);
+      return new LLMClient(provider);
+    }
 
     if (!apikey){
       throw new Error('OPENROUTER_API_KEY not set in .env');
     }
 
     const provider = new OpenRouterProvider(apikey,model);
-
+      
     //verification
     const available =  await provider.isAvailable();
     if (!available){
@@ -150,6 +163,20 @@ private formatToolsForLLM(tools: Tool[]): string {
   // parse llm response => PlanenrResponse (handles the off chance that the llm returns garbage)
   private parseResponse(content: string): PlannerResponse{
     try{
+
+      // extract thinking from qwen 
+      let thinking string | undefined;
+      let cleaned = content;
+
+      // qwen uses <think> tags 
+      const thinkMatch = content.match(/<think>([\s\S]*?)<\/think>/);
+      if (thinkMatch){
+        thinking = thinkMatch[1].trim();
+        // remove thinking before parsing json\n
+        cleaned = content.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+      }
+
+
       // remove markdown code blocks if it exists
       const cleaned = content.replace(/```json\n?/g, '' ).replace(/```\n?/g, '').trim();
       const parsed = JSON.parse(cleaned);
@@ -157,6 +184,11 @@ private formatToolsForLLM(tools: Tool[]): string {
       //validates it and match with PlanenrResponseSchema
       if (!parsed.type){
         throw new Error ('Missing type field');
+      }
+
+      // attach thinking if exist 
+      if (thinking && parsed.type === 'tool_call'){
+        (parsed as any).thinking = thinking;
       }
 
       if (parsed.type ==='tool_call'){
