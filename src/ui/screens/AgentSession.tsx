@@ -9,6 +9,7 @@ import { ActionPanel } from '../components/ActionPanel.js';
 import { HistoryPanel } from '../components/HistoryPanel.js';
 import { StatsBar } from '../components/StatsBar.js';
 import { colors, icons } from '../design-system.js';
+import { ThinkingPanel } from '../components/ThinkingPanel.js';
 
 interface AgentSessionProps {
   runtime: AgentRuntime;
@@ -17,6 +18,7 @@ interface AgentSessionProps {
 }
 
 export const AgentSession: React.FC<AgentSessionProps> = ({ runtime, task, onComplete }) => {
+  const [currentThinking, setCurrentThinking] = useState<string | null>(null);
   const [state, setState] = useState<AgentState>(runtime.getState());
   const [plan, setPlan] = useState<Plan | null>(null);
   const [currentToolCall, setCurrentToolCall] = useState<ToolCall | null>(null);
@@ -45,6 +47,9 @@ export const AgentSession: React.FC<AgentSessionProps> = ({ runtime, task, onCom
           }
 
           if (event.type === 'llm_response' && event.parsed.type === 'tool_call') {
+            if (event.thinking){
+              setCurrentThinking(event.thinking);
+            }
             setCurrentToolCall({
               name: event.parsed.tool,
               args: event.parsed.args,
@@ -100,6 +105,13 @@ export const AgentSession: React.FC<AgentSessionProps> = ({ runtime, task, onCom
           args={currentToolCall.args}
           reasoning={currentToolCall.reasoning}
           isExecuting={state.status === 'executing_tool'}
+        />
+      )}
+
+      {currentThinking && (
+        <ThinkingPanel 
+          thinking={currentThinking} 
+          isActive={state.status === 'acting'}
         />
       )}
 
