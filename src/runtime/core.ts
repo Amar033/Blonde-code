@@ -186,7 +186,8 @@ export class AgentRuntime {
       const llmEvent: AgentEvent= {
         type: 'llm_response',
         content: JSON.stringify(planResponse),
-        parsed: planResponse
+        parsed: planResponse,
+        thinking: (planResponse as any).thinking,
       };
       yield llmEvent;
       this.emit(llmEvent);
@@ -468,9 +469,11 @@ export class AgentRuntime {
         summary = `Read ${input.path}: ${lines} lines${result.metadata?.truncated ? '(truncated)' : ''}`;
         break;
 
-      case 'list_file':
-        const items = Array.isArray(result.output) ?result.output.length: 0;
-        summary = `Listed ${input.path} : ${items} items`;
+      case 'list_files':
+        const fileCount = result.metadata?.fileCount ?? 0;
+        const tsFileCount = result.metadata?.tsFileCount ?? 0;
+        const dirCount = result.metadata?.dirCount ?? 0;
+        summary = `Listed ${input.path}: ${fileCount} files (${tsFileCount} TS), ${dirCount} dirs`;
         break;
 
       default:

@@ -1,6 +1,7 @@
 import type {LLMProvider, LLMCallOptions, LLMResponse} from './providers/base.js';
 import type {PlanenrResponse } from '../types/events.js';
 import {OpenRouterProvider} from './providers/openrouter.js';
+import {OllamaProvider} from './providers/ollama.js';
 import {Tool} from '../tools/base.js';
 /**
  * LLM Client 
@@ -15,16 +16,28 @@ export class LLMClient{
 
   // create client from environment
   static async fromEnv(): Promise<LLMClient> {
-    const providerName = process.env.LLMProvider || 'openrouter';
+    const providerName = process.env.LLMProvider || 'ollama';
     const apikey = process.env.OPENROUTER_API_KEY;
-    const model = process.env.LLM_MODEL;
+    const model = process.env.LLM_MODEL || 'qwen3.5:latest';
+    
+    if (providerName === 'ollama') {
+      const baseURL = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
+      const provider = new OllamaProvider(model, baseURL);
+    
+      const available = await provider.isAvailable();
+      if (!available) {
+        throw new Error('Ollama server not running. Start it with: ollama serve');
+      }
+      console.log(`[LLM] Initialized with Ollama: ${model}`);
+      return new LLMClient(provider);
+    }
 
     if (!apikey){
       throw new Error('OPENROUTER_API_KEY not set in .env');
     }
 
     const provider = new OpenRouterProvider(apikey,model);
-
+      
     //verification
     const available =  await provider.isAvailable();
     if (!available){
@@ -54,40 +67,37 @@ export class LLMClient{
   }
 
   //act mode
-  async act (plan: string, observations : string[], availableTools: Tool[]): Promise<PlannerResponse> {
+  async act(plan: string, observations: string[], availableTools: Tool[]): Promise<PlannerResponse> {
     const toolDescriptions = this.formatToolsForLLM(availableTools);
-    const prompt = `You are a coding agent executing a plan. You have access to these tools: ${toolDescriptions} Plan: ${plan} 
-        Previous observations: 
-          ${observations.lenght>0? observations.map((o,i)=> `${i+1}. ${o}`).join('\n'):'None yet.'}
-        Based on the plan and observations, decide what to do next.
-        RESPONSE FORMAT (JSON ONLY):
-        Option1 - Use a tool:
-        {
-          "type":"tool_call",
-          "tool":"tool_name",
-          "args":{"arg1","value1",...},
-          "reasoning":"why this tool now"
-        }
-        
-        Option2 - Task Comple, provide answer:
-        {
-          "type":"answer"
-          "content": "final answer to the user"
-        }
+  
+    const prompt = `You are executing a plan. You have access to these tools:
 
-        Option3 - Need more info from user:
-        {
-          "type":"need_info",
-          "question": "what do you need to know?"
-        }
-          Respond with JSON only, no markdown`;
-    
-    const response = await this.provider.call(prompt,{
-      mode:'act',
+    ${toolDescriptions}
+
+    CURRENT PLAN:
+    ${plan}
+
+    OBSERVATIONS FROM PREVIOUS ACTIONS:
+    ${observations.length > 0  ? observations.map((o, i) => `${i + 1}. ${o}`).join('\n'): 'None yet - this is the first action.'}
+
+    CRITICAL INSTRUCTIONS:
+    - If you need to USE A TOOL, respond with: {"type": "tool_call", "tool": "tool_name", "args": {"arg1": "value1"}, "reasoning": "why"}
+    - If you have COMPLETED THE TASK, respond with: {"type": "answer", "content": "your final answer to the user"}
+    - If you need MORE INFO from user, respond with: {"type": "need_info", "question": "what you need"}
+
+    IMPORTANT: 
+    - When you call a tool, I will execute it and give you the result
+    - Do NOT just describe what you would do - actually call the tool with real arguments
+    - When the task is done, provide a clear answer to the user
+
+    What should we do next? Respond in JSON only:`;
+
+    const response = await this.provider.call(prompt, {
+      mode: 'act',
       temperature: 0.5,
       maxTokens: 1000,
     });
-
+  
     return this.parseResponse(response.content);
   }
 
@@ -146,17 +156,56 @@ private formatToolsForLLM(tools: Tool[]): string {
   
   return formattedTools.join('\n\n---\n\n');
 } 
+  private extractThinking(content: string) {
+    let thinking: string | undefined;
+    let cleaned = content;
+
+    // Ollama format
+    const start = content.indexOf("Thinking...");
+    const end = content.indexOf("...done thinking.");
+
+    if (start !== -1 && end !== -1 && end > start) {
+      thinking = content
+        .slice(start + "Thinking...".length, end)
+        .trim();
+
+      cleaned =
+        content.slice(0, start) +
+        content.slice(end + "...done thinking.".length);
+    }
+
+    // Qwen <think> format fallback
+    const thinkMatch = cleaned.match(/<think>([\s\S]*?)<\/think>/);
+
+    if (thinkMatch) {
+      thinking = thinkMatch[1].trim();
+      cleaned = cleaned.replace(/<think>[\s\S]*?<\/think>/g, "");
+    }
+
+    return { thinking, cleaned: cleaned.trim() };
+  }
+
 
   // parse llm response => PlanenrResponse (handles the off chance that the llm returns garbage)
   private parseResponse(content: string): PlannerResponse{
     try{
+      console.log("RAW LLM RESPONSE:");
+      console.log(content);
+      // extract thinking from qwen 
+      let { thinking, cleaned } = this.extractThinking(content);
+
       // remove markdown code blocks if it exists
-      const cleaned = content.replace(/```json\n?/g, '' ).replace(/```\n?/g, '').trim();
+      cleaned = content.replace(/```json\n?/g, '' ).replace(/```\n?/g, '').trim();
       const parsed = JSON.parse(cleaned);
 
       //validates it and match with PlanenrResponseSchema
       if (!parsed.type){
         throw new Error ('Missing type field');
+      }
+
+      // attach thinking if exist 
+      if (thinking && parsed.type === 'tool_call'){
+        (parsed as any).thinking = thinking;
       }
 
       if (parsed.type ==='tool_call'){
