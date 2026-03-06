@@ -10,6 +10,7 @@ import { ActionPanel } from './ActionPanel.js';
 import { HistoryPanel } from './HistoryPanel.js';
 import { StatsBar } from './StatsBar.js';
 import { colors, icons } from '../design-system.js';
+import {ThinkingPanel} from '../components/ThinkingPanel.js'
 
 interface AgentUIProps {
   runtime: AgentRuntime;
@@ -18,6 +19,7 @@ interface AgentUIProps {
 
 export const AgentUI: React.FC<AgentUIProps> = ({ runtime, task }) => {
   // State
+  const [currentThinking, setCurrentThinking]=useState<string | null>(null);
   const [state, setState] = useState<AgentState>(runtime.getState());
   const [plan, setPlan] = useState<Plan | null>(null);
   const [currentToolCall, setCurrentToolCall] = useState<ToolCall | null>(null);
@@ -43,13 +45,15 @@ export const AgentUI: React.FC<AgentUIProps> = ({ runtime, task }) => {
     (async () => {
       try {
         for await (const event of runtime.run(task)) {
-          setState(runtime.getState());
-
+          setState(runtime.getState());            
           if (event.type === 'plan_generated') {
             setPlan(event.plan);
           }
 
           if (event.type === 'llm_response' && event.parsed.type === 'tool_call') {
+            if(event.thinking){
+              setCurrentThinking(event.thinking);
+            }
             setCurrentToolCall({
               name: event.parsed.tool,
               args: event.parsed.args,
@@ -115,6 +119,13 @@ export const AgentUI: React.FC<AgentUIProps> = ({ runtime, task }) => {
           args={currentToolCall.args}
           reasoning={currentToolCall.reasoning}
           isExecuting={state.status === 'executing_tool'}
+        />
+      )}
+
+      {currentThinking && (
+        <ThinkingPanel 
+          thinking={currentThinking} 
+          isActive={state.status === 'acting'}
         />
       )}
 
