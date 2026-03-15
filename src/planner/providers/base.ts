@@ -1,4 +1,4 @@
-import type (PlannerResponse) from '../../types/event.js'
+import type { PlannerResponse } from '../../types/event.js'
 
 
 /**

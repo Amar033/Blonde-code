@@ -134,7 +134,7 @@ export class AgentRuntime {
     }
 
     // yield acting phase
-    yield* this.actingPhase();
+    yield* this.actingPhase(input);
 
     // emit final Result
     if (this.state.status == 'completed'){
@@ -186,7 +186,8 @@ export class AgentRuntime {
       const llmEvent: AgentEvent= {
         type: 'llm_response',
         content: JSON.stringify(planResponse),
-        parsed: planResponse
+        parsed: planResponse,
+        thinking: (planResponse as any).thinking,
       };
       yield llmEvent;
       this.emit(llmEvent);
@@ -249,7 +250,7 @@ export class AgentRuntime {
   }
 
   // Acting Phase
-  private async *actingPhase(): AsyncGenerator<AgentEvent>{
+  private async *actingPhase(userInput: string): AsyncGenerator<AgentEvent>{
     if(this.state.status != 'plan_ready') return;
     const plan = this.state.plan;
     let observations: Observation[] = [];
@@ -297,7 +298,8 @@ export class AgentRuntime {
         const response = await this.llmClient!.act(
           plan.reasoning,
           observationSummaries,
-          availableTools
+          availableTools,
+          userInput
         );
         const llmEvent: AgentEvent={
           type: 'llm_response',
@@ -465,17 +467,19 @@ export class AgentRuntime {
     //tool specific summary
     switch(toolName){
       case 'read_file':
-        const lines= typeof result.output===' string' ? result.output.split('\n').length : 0;
-        summary = `Read ${input.path}: ${lines} lines${result.metadata?.truncated ? '(truncated)' : ''}`;
+        const lines = typeof result.output === 'string' ? result.output.split('\n').length : 0;
+        summary = `Read ${input.path}: ${lines} lines${result.metadata?.truncated ? ' (truncated)' : ''}`;
         break;
 
-      case 'list_file':
-        const items = Array.isArray(result.output) ?result.output.length: 0;
-        summary = `Listed ${input.path} : ${items} items`;
+      case 'list_files':
+        const tsFiles = result.metadata?.tsFiles || [];
+        const directories = result.metadata?.directories || [];
+        // Include actual file names so LLM knows what was found
+        summary = `Listed ${input.path}: Found ${tsFiles.length} TypeScript files (${tsFiles.join(', ')}). Directories: ${directories.join(', ')}`;
         break;
 
       default:
-        summary = `Executed ${toolName} succesfully`;
+        summary = `Executed ${toolName} successfully`;
     }
 
     return {
