@@ -464,22 +464,103 @@ export class AgentRuntime {
     result: any
   ): Observation{
     let summary: string;
-    //tool specific summary
+    
     switch(toolName){
       case 'read_file':
-        const lines = typeof result.output === 'string' ? result.output.split('\n').length : 0;
-        summary = `Read ${input.path}: ${lines} lines${result.metadata?.truncated ? ' (truncated)' : ''}`;
+        if (result.success && result.output) {
+          const output = result.output;
+          const lines = typeof output.content === 'string' ? output.content.split('\n').length : 0;
+          summary = `Read ${input.path}: ${lines} lines${result.metadata?.truncated ? ' (truncated)' : ''}`;
+        } else {
+          summary = `Failed to read ${input.path}: ${result.error}`;
+        }
         break;
 
       case 'list_files':
-        const tsFiles = result.metadata?.tsFiles || [];
-        const directories = result.metadata?.directories || [];
-        // Include actual file names so LLM knows what was found
-        summary = `Listed ${input.path}: Found ${tsFiles.length} TypeScript files (${tsFiles.join(', ')}). Directories: ${directories.join(', ')}`;
+        if (result.success && result.metadata) {
+          const { fileCount, dirCount, files, directories } = result.metadata;
+          summary = `Listed ${input.path}: Found ${fileCount} files, ${dirCount} directories. Files: ${(files || []).slice(0, 10).join(', ')}${(files?.length || 0) > 10 ? '...' : ''}`;
+        } else {
+          summary = `Failed to list ${input.path}: ${result.error}`;
+        }
+        break;
+
+      case 'write_file':
+        if (result.success && result.output) {
+          summary = `Wrote ${result.output.bytesWritten} bytes to ${input.path} (${result.output.linesWritten} lines)`;
+        } else {
+          summary = `Failed to write ${input.path}: ${result.error}`;
+        }
+        break;
+
+      case 'edit_file':
+        if (result.success && result.output) {
+          summary = `Edited ${input.path}: replaced ${result.output.charsReplaced} chars, net change: ${result.output.netChange > 0 ? '+' : ''}${result.output.netChange} chars`;
+        } else {
+          summary = `Failed to edit ${input.path}: ${result.error}`;
+        }
+        break;
+
+      case 'bash':
+        if (result.success && result.output) {
+          const { stdout, stderr, exitCode } = result.output;
+          const outputPreview = stdout ? stdout.slice(0, 500) : '';
+          summary = `Executed bash: exit code ${exitCode}. Output: ${outputPreview}${stdout?.length > 500 ? '...(truncated)' : ''}`;
+        } else {
+          summary = `Bash failed: ${result.error}`;
+        }
+        break;
+
+      case 'grep':
+        if (result.success && result.output) {
+          const { matches, results, filesMatched } = result.output;
+          summary = `Search found ${matches} matches in ${filesMatched} files. First results: ${(results || []).slice(0, 3).map((r: any) => `${r.file}:${r.line}`).join(', ')}`;
+        } else {
+          summary = `Search failed: ${result.error}`;
+        }
+        break;
+
+      case 'glob':
+        if (result.success && result.output) {
+          const { matches, files } = result.output;
+          summary = `Found ${matches} files matching pattern. Files: ${(files || []).slice(0, 10).join(', ')}${(files?.length || 0) > 10 ? '...' : ''}`;
+        } else {
+          summary = `Glob failed: ${result.error}`;
+        }
+        break;
+
+      case 'web_fetch':
+        if (result.success && result.output) {
+          const { statusCode, contentLength, content } = result.output;
+          summary = `Fetched ${input.url}: HTTP ${statusCode}, ${contentLength} chars. Content preview: ${(content || '').slice(0, 200)}...`;
+        } else {
+          summary = `Web fetch failed: ${result.error}`;
+        }
+        break;
+
+      case 'web_search':
+        if (result.success && result.output) {
+          const { resultsCount, results } = result.output;
+          summary = `Web search found ${resultsCount} results. Top: ${(results || []).slice(0, 3).map((r: any) => r.title).join(' | ')}`;
+        } else {
+          summary = `Web search failed: ${result.error}`;
+        }
         break;
 
       default:
-        summary = `Executed ${toolName} successfully`;
+        // For any new tools, provide helpful info
+        if (result.success) {
+          summary = `Executed ${toolName} successfully`;
+          // Try to add useful info if available
+          if (result.output) {
+            const outputStr = typeof result.output === 'string' 
+              ? result.output.slice(0, 200) 
+              : JSON.stringify(result.output).slice(0, 200);
+            summary += `. Result: ${outputStr}`;
+          }
+        } else {
+          summary = `${toolName} failed: ${result.error || 'Unknown error'}`;
+        }
     }
 
     return {
@@ -488,7 +569,7 @@ export class AgentRuntime {
       result: result.output,
       summary,
       timestamp: new Date(),
-      success: true,
+      success: result.success,
     };
   }
 

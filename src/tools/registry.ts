@@ -1,6 +1,13 @@
 import type {Tool} from './base.js';
 import {ReadFileTool} from './file-read.js';
-import {ListFileTool} from './list-files.js';
+import {ListFilesTool} from './list-files.js';
+import {WriteFileTool} from './file-write.js';
+import {EditFileTool} from './file-edit.js';
+import {BashTool} from './bash.js';
+import {GrepTool} from './grep.js';
+import {GlobTool} from './glob.js';
+import {WebFetchTool} from './web-fetch.js';
+import {WebSearchTool} from './web-search.js';
 
 // central regitry of all built in tools, agent runtime can see all tools by name here
 
@@ -8,11 +15,18 @@ import {ListFileTool} from './list-files.js';
 export class ToolRegistry {
   private tools = new Map<string, Tool>();
 
- // constructor(){
- //   // register available tools
- //   this.register(new ReadFileTool());
- //   this.register(new ListFileTool());
- // }
+  constructor(){
+    // register available tools
+    this.register(new ReadFileTool());
+    this.register(new ListFilesTool());
+    this.register(new WriteFileTool());
+    this.register(new EditFileTool());
+    this.register(new BashTool());
+    this.register(new GrepTool());
+    this.register(new GlobTool());
+    this.register(new WebFetchTool());
+    this.register(new WebSearchTool());
+  }
 
   register (tool: Tool): void {
     if (this.tools.has(tool.name)){

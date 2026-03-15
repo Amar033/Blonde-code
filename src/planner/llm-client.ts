@@ -69,6 +69,15 @@ export class LLMClient{
   //act mode
   async act(plan: string, observations: string[], availableTools: Tool[], userInput?: string): Promise<PlannerResponse> {
     const toolDescriptions = this.formatToolsForLLM(availableTools);
+    
+    // Detect if we're looping on the same tool
+    const lastObservation = observations.length > 0 ? observations[observations.length - 1] : '';
+    const secondLastObservation = observations.length > 1 ? observations[observations.length - 2] : '';
+    
+    const loopWarning = (lastObservation && secondLastObservation && 
+      lastObservation.substring(0, 50) === secondLastObservation.substring(0, 50))
+      ? `\n⚠️ WARNING: You appear to be repeating the same action! If you've already tried this, try a DIFFERENT approach.\n`
+      : '';
   
     const prompt = `You are executing a plan to help the user. You have access to these tools:
 
@@ -81,6 +90,7 @@ ${plan}
 
 OBSERVATIONS FROM PREVIOUS ACTIONS:
 ${observations.length > 0  ? observations.map((o, i) => `${i + 1}. ${o}`).join('\n'): 'None yet - this is the first action.'}
+${loopWarning}
 
 YOUR JOB:
 - Execute the plan step by step using the available tools
@@ -94,10 +104,12 @@ Respond with ONE of these formats:
 {"type": "answer", "content": "final answer to user"}
 {"type": "need_info", "question": "what you need from user"}
 
-IMPORTANT: 
-- If you just ran a tool and got a result, DON'T run the same tool again - analyze the result!
-- If you have the information the user asked for, return an ANSWER, don't call more tools!
-- Use tools when needed, but know when to stop!`;
+CRITICAL RULES:
+1. If you just ran a tool and got a result, analyze it BEFORE calling another tool!
+2. If the observation shows files, paths, or results - USE THAT INFORMATION in your answer
+3. If you have the information the user asked for, return {"type": "answer"} - don't call more tools!
+4. Don't call the same tool twice with the same arguments - that's looping!
+5. Know when to stop - you don't need more tools if the task is complete!`;
 
     const response = await this.provider.call(prompt, {
       mode: 'act',

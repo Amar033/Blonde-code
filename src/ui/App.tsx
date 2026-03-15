@@ -2,8 +2,6 @@ import React, { useState } from 'react';
 import { Box } from 'ink';
 import { AgentRuntime } from '../runtime/core.js';
 import { ToolRegistry } from '../tools/registry.js';
-import { ReadFileTool } from '../tools/file-read.js';
-import { ListFilesTool } from '../tools/list-files.js';
 import { WelcomeScreen} from './screens/WelcomeScreen.js';
 import { ChatScreen } from './screens/ChatScreen.js';
 import { AgentSession } from './screens/AgentSession.js';
@@ -16,9 +14,8 @@ export const App: React.FC = () => {
   const [runtime, setRuntime] = useState<AgentRuntime | null>(null);
 
   const initializeRuntime = async () => {
+    // ToolRegistry constructor now auto-registers all 9 tools
     const registry = new ToolRegistry();
-    registry.register(new ReadFileTool());
-    registry.register(new ListFilesTool());
 
     const rt = new AgentRuntime(registry, {
       maxTurns: 30,
