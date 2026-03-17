@@ -41,6 +41,7 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({
       {/* Observations */}
       <Box flexDirection="column" marginTop={1}>
         {visible.map((obs, index) => {
+          if (!obs) return null;
           const displayIcon = obs.success ? icons.success : icons.error;
           const displayColor = obs.success ? colors.success : colors.error;
 

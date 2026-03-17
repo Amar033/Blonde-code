@@ -8,9 +8,11 @@ export type AgentEvent =
   | {type: 'user_input'; input: string}
   | {type: 'plan_generated'; plan: Plan}
   | {type: 'llm_response'; content: string; parsed: PlannerResponse; thinking?: string}
+  | {type: 'llm_streaming'; delta: string; thinking?: string}
   | {type: 'tool_validated'; valid: boolean; reason?: string}
   | {type: 'tool_result'; toolName: string; result: unknown}
   | {type: 'tool_error'; toolName: string; error: string}
+  | {type: 'tool_approval_needed'; toolCall: { name: string; args: Record<string, unknown>; reasoning?: string }}
   | {type: 'observation_ready'; observation: Observation}
   | {type: 'user_approval'; approved: boolean}
   | {type: 'abort'; reason: string}

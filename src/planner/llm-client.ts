@@ -1,5 +1,5 @@
-import type {LLMProvider, LLMCallOptions, LLMResponse} from './providers/base.js';
-import type {PlanenrResponse } from '../types/events.js';
+import type {LLMProvider, LLMCallOptions, LLMResponse, LLMStreamDelta} from './providers/base.js';
+import type {PlannerResponse } from '../types/events.js';
 import {OpenRouterProvider} from './providers/openrouter.js';
 import {OllamaProvider} from './providers/ollama.js';
 import {Tool} from '../tools/base.js';
@@ -48,6 +48,23 @@ export class LLMClient{
     return new LLMClient(provider);
   }
 
+  // Check if provider supports streaming
+  supportsStreaming(): boolean {
+    return typeof this.provider.stream === 'function';
+  }
+
+  // Stream a prompt - yields deltas for real-time display
+  async *streamPrompt(prompt: string, options?: LLMCallOptions): AsyncGenerator<LLMStreamDelta, void, unknown> {
+    if (!this.supportsStreaming()) {
+      // Fallback to non-streaming
+      const response = await this.provider.call(prompt, options);
+      yield { type: 'content', content: response.content };
+      yield { type: 'done', content: '' };
+      return;
+    }
+    yield* this.provider.stream!(prompt, options);
+  }
+
     // plan mode
     async plan(input: string): Promise<PlannerResponse> {
     const prompt = `You are a coding agent. Create a high-level plan to accomplish this task . UserRequest: ${input} 
@@ -67,7 +84,13 @@ export class LLMClient{
   }
 
   //act mode
-  async act(plan: string, observations: string[], availableTools: Tool[], userInput?: string): Promise<PlannerResponse> {
+  async act(
+    plan: string, 
+    observations: string[], 
+    availableTools: Tool[], 
+    userInput?: string,
+    toolCallHistory?: string
+  ): Promise<PlannerResponse> {
     const toolDescriptions = this.formatToolsForLLM(availableTools);
     
     // Detect if we're looping on the same tool
@@ -77,6 +100,10 @@ export class LLMClient{
     const loopWarning = (lastObservation && secondLastObservation && 
       lastObservation.substring(0, 50) === secondLastObservation.substring(0, 50))
       ? `\n⚠️ WARNING: You appear to be repeating the same action! If you've already tried this, try a DIFFERENT approach.\n`
+      : '';
+    
+    const historyNote = toolCallHistory 
+      ? `\nTOOLS ALREADY CALLED:\n${toolCallHistory}\n\nIMPORTANT: Don't call a tool again with the same arguments! If you just called it, analyze the result instead.\n`
       : '';
   
     const prompt = `You are executing a plan to help the user. You have access to these tools:
@@ -91,6 +118,7 @@ ${plan}
 OBSERVATIONS FROM PREVIOUS ACTIONS:
 ${observations.length > 0  ? observations.map((o, i) => `${i + 1}. ${o}`).join('\n'): 'None yet - this is the first action.'}
 ${loopWarning}
+${historyNote}
 
 YOUR JOB:
 - Execute the plan step by step using the available tools
