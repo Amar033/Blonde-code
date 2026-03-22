@@ -1,6 +1,9 @@
 // main entry point
 
 import {AgentRuntime} from './runtime/core.js'
+import {ToolRegistry} from './tools/registry.js'
+import {ReadFileTool} from './tools/file-read.js'
+import {ListFilesTool} from './tools/list-files.js'
 import dotenv from 'dotenv';
 
 // Load environment variables
@@ -8,7 +11,13 @@ dotenv.config();
 
 async function main() {
   console.log('Blonde Code - Starting...\n');
-  const runtime = new AgentRuntime({
+  
+  // Create and populate tool registry
+  const toolRegistry = new ToolRegistry();
+  toolRegistry.register(new ReadFileTool());
+  toolRegistry.register(new ListFilesTool());
+  
+  const runtime = new AgentRuntime(toolRegistry, {
     maxTurns: 10,
     debug: true,
   });
@@ -21,7 +30,7 @@ async function main() {
   });
 
   // test input 
-  const testInput = "Create a function that calculates fibonacci numbers";
+  const testInput = "list files in src directory";
   
   console.log(`\n[User]: ${testInput}\n`);
   for await (const event of runtime.run(testInput)){

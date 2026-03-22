@@ -1,9 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Box, Text } from 'ink';
 import TextInput from 'ink-text-input';
-import terminalImage from 'terminal-image';
 import { colors, icons } from '../design-system.js';
-import fs from 'fs';
 
 interface WelcomeScreenProps {
   onStart: (task: string) => void;
@@ -11,24 +9,9 @@ interface WelcomeScreenProps {
 
 export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart }) => {
   const [task, setTask] = useState('');
-  const [mascotImage, setMascotImage] = useState('');
 
-  // Load mascot image on mount
-  useEffect(() => {
-    (async () => {
-      try {
-        // Put your salamander.png in src/ui/assets/
-        const imageBuffer = fs.readFileSync('./src/ui/assets/blonde-mascot.png');
-        const rendered = await terminalImage.buffer(imageBuffer, { 
-          width: 20,  // Adjust size
-          height: 10, 
-        });
-        setMascotImage(rendered);
-      } catch (error) {
-        console.error('Failed to load mascot:', error);
-      }
-    })();
-  }, []);
+  // Mascot disabled - terminal-image causes React key conflicts with ANSI codes
+  // Can be re-enabled with a custom rendering approach
 
   return (
     <Box flexDirection="column" height="100%">
@@ -48,12 +31,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart }) => {
           </Text>
           <Text dimColor>Welcome back!</Text>
           
-          {/* Display PNG mascot */}
-          {mascotImage && (
-            <Box marginTop={1}>
-              <Text>{mascotImage}</Text>
-            </Box>
-          )}
+          {/* Mascot disabled - terminal-image causes React key conflicts */}
 
           <Box marginTop={1}>
             <Text dimColor>

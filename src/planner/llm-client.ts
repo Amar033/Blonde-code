@@ -1,5 +1,5 @@
-import type {LLMProvider, LLMCallOptions, LLMResponse} from './providers/base.js';
-import type {PlanenrResponse } from '../types/events.js';
+import type {LLMProvider, LLMCallOptions, LLMResponse, LLMStreamDelta} from './providers/base.js';
+import type {PlannerResponse } from '../types/events.js';
 import {OpenRouterProvider} from './providers/openrouter.js';
 import {OllamaProvider} from './providers/ollama.js';
 import {Tool} from '../tools/base.js';
@@ -16,7 +16,7 @@ export class LLMClient{
 
   // create client from environment
   static async fromEnv(): Promise<LLMClient> {
-    const providerName = process.env.LLMProvider || 'ollama';
+    const providerName = process.env.LLM_PROVIDER || 'ollama';
     const apikey = process.env.OPENROUTER_API_KEY;
     const model = process.env.LLM_MODEL || 'qwen3.5:latest';
     
@@ -48,6 +48,23 @@ export class LLMClient{
     return new LLMClient(provider);
   }
 
+  // Check if provider supports streaming
+  supportsStreaming(): boolean {
+    return typeof this.provider.stream === 'function';
+  }
+
+  // Stream a prompt - yields deltas for real-time display
+  async *streamPrompt(prompt: string, options?: LLMCallOptions): AsyncGenerator<LLMStreamDelta, void, unknown> {
+    if (!this.supportsStreaming()) {
+      // Fallback to non-streaming
+      const response = await this.provider.call(prompt, options);
+      yield { type: 'content', content: response.content };
+      yield { type: 'done', content: '' };
+      return;
+    }
+    yield* this.provider.stream!(prompt, options);
+  }
+
     // plan mode
     async plan(input: string): Promise<PlannerResponse> {
     const prompt = `You are a coding agent. Create a high-level plan to accomplish this task . UserRequest: ${input} 
@@ -67,30 +84,67 @@ export class LLMClient{
   }
 
   //act mode
-  async act(plan: string, observations: string[], availableTools: Tool[]): Promise<PlannerResponse> {
+  async act(
+    plan: string, 
+    observations: string[], 
+    availableTools: Tool[], 
+    userInput?: string,
+    toolCallHistory?: string,
+    forceSynthesis?: boolean
+  ): Promise<PlannerResponse> {
     const toolDescriptions = this.formatToolsForLLM(availableTools);
+    
+    // Detect if we're looping on the same tool
+    const lastObservation = observations.length > 0 ? observations[observations.length - 1] : '';
+    const secondLastObservation = observations.length > 1 ? observations[observations.length - 2] : '';
+    
+    const loopWarning = (lastObservation && secondLastObservation && 
+      lastObservation.substring(0, 50) === secondLastObservation.substring(0, 50))
+      ? `\n⚠️ WARNING: You appear to be repeating the same action! If you've already tried this, try a DIFFERENT approach.\n`
+      : '';
+    
+    const historyNote = toolCallHistory 
+      ? `\nTOOLS ALREADY CALLED:\n${toolCallHistory}\n\nIMPORTANT: Don't call a tool again with the same arguments! If you just called it, analyze the result instead.\n`
+      : '';
+    
+    const synthesisWarning = forceSynthesis
+      ? `\n⚠️ CRITICAL: You have gathered ${observations.length} observations! This is enough to answer the user. STOP calling tools and provide your final answer now. If you need ONE more specific piece of info, get it and then answer.\n`
+      : '';
   
-    const prompt = `You are executing a plan. You have access to these tools:
+    const prompt = `You are executing a plan to help the user. You have access to these tools:
 
-    ${toolDescriptions}
+${toolDescriptions}
 
-    CURRENT PLAN:
-    ${plan}
+USER REQUEST: ${userInput || 'Not provided'}
 
-    OBSERVATIONS FROM PREVIOUS ACTIONS:
-    ${observations.length > 0  ? observations.map((o, i) => `${i + 1}. ${o}`).join('\n'): 'None yet - this is the first action.'}
+CURRENT PLAN:
+${plan}
 
-    CRITICAL INSTRUCTIONS:
-    - If you need to USE A TOOL, respond with: {"type": "tool_call", "tool": "tool_name", "args": {"arg1": "value1"}, "reasoning": "why"}
-    - If you have COMPLETED THE TASK, respond with: {"type": "answer", "content": "your final answer to the user"}
-    - If you need MORE INFO from user, respond with: {"type": "need_info", "question": "what you need"}
+OBSERVATIONS FROM PREVIOUS ACTIONS:
+${observations.length > 0  ? observations.map((o, i) => `${i + 1}. ${o}`).join('\n'): 'None yet - this is the first action.'}
+${loopWarning}
+${historyNote}
+${synthesisWarning}
 
-    IMPORTANT: 
-    - When you call a tool, I will execute it and give you the result
-    - Do NOT just describe what you would do - actually call the tool with real arguments
-    - When the task is done, provide a clear answer to the user
+YOUR JOB:
+- Execute the plan step by step using the available tools
+- After each tool result, analyze the result and determine what to do next
+- If you have the answer to the user's request, respond with {"type": "answer", "content": "your answer"}
+- If you need more info, respond with {"type": "need_info", "question": "what you need"}
+- Otherwise, call another tool or continue with the plan
 
-    What should we do next? Respond in JSON only:`;
+Respond with ONE of these formats:
+{"type": "tool_call", "tool": "tool_name", "args": {...}, "reasoning": "why this tool"}
+{"type": "answer", "content": "final answer to user"}
+{"type": "need_info", "question": "what you need from user"}
+
+CRITICAL RULES:
+1. If you just ran a tool and got a result, analyze it BEFORE calling another tool!
+2. If the observation shows files, paths, or results - USE THAT INFORMATION in your answer
+3. If you have the information the user asked for, return {"type": "answer"} - don't call more tools!
+4. Don't call the same tool twice with the same arguments - that's looping!
+5. Know when to stop - you don't need more tools if the task is complete!
+${forceSynthesis ? '6. STOP NOW - You have enough information. Answer the user!' : ''}`;
 
     const response = await this.provider.call(prompt, {
       mode: 'act',

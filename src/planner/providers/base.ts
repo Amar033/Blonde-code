@@ -1,4 +1,4 @@
-import type (PlannerResponse) from '../../types/event.js'
+import type { PlannerResponse } from '../../types/event.js'
 
 
 /**
@@ -15,6 +15,9 @@ export interface LLMProvider {
   // call llm with a prompt and gert structures response 
   call (prompt:string, options?:LLMCallOptions):Promise<LLMResponse>;
   
+  // streaming call - yields deltas as they arrive
+  stream?(prompt: string, options?: LLMCallOptions): AsyncGenerator<LLMStreamDelta, void, unknown>;
+   
   // check if provider is available 
   isAvailable(): Promise<boolean>;
 }
@@ -36,4 +39,10 @@ export interface LLMResponse{
     totalTokens: number;
   };
   model?: string;
+}
+
+// Streaming delta from LLM
+export interface LLMStreamDelta {
+  type: 'content' | 'thinking' | 'done';
+  content: string;
 }
