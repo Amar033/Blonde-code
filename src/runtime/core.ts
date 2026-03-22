@@ -406,6 +406,9 @@ export class AgentRuntime {
       console.log(`[Runtime] Act mode (loop ${loopCount}, turn ${turn})...`);
       const observationSummaries= observations.map(o=>o.summary);
       const toolCallHistorySummary = this.getToolCallSummary();
+      
+      // Force synthesis if we have too many observations
+      const forceSynthesis = observations.length >= 8;
 
       try{
         // Check for abort before LLM call
@@ -416,7 +419,8 @@ export class AgentRuntime {
           observationSummaries,
           availableTools,
           userInput,
-          toolCallHistorySummary
+          toolCallHistorySummary,
+          forceSynthesis
         );
         
         // Check for abort after LLM call

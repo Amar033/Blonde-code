@@ -1,11 +1,23 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput, useStdout } from 'ink';
 import TextInput from 'ink-text-input';
 import { AgentRuntime } from '../../runtime/core.js';
 import { ToolRegistry } from '../../tools/registry.js';
 import { LLMClient } from '../../planner/llm-client.js';
 import { colors, icons } from '../design-system.js';
+import { ToolCallBlock, ToolCallChain, PlanDisplay, ThinkingIndicator } from '../components/ToolCallDisplay.js';
+import { ToolCallLogChain } from '../components/ToolCallLog.js';
+import { Header, Mascot } from '../components/ResponsiveLayout.js';
 import type { AgentState, Plan, Observation } from '../../types/agent.js';
+
+interface ToolCall {
+  id: string;
+  tool: string;
+  args: Record<string, unknown>;
+  status: 'pending' | 'running' | 'success' | 'error';
+  result?: string;
+  timestamp: Date;
+}
 
 interface Message {
   id: string;
@@ -14,6 +26,8 @@ interface Message {
   timestamp: Date;
   isStreaming?: boolean;
   toolName?: string;
+  toolCalls?: ToolCall[];
+  plan?: Plan;
 }
 
 interface UnifiedSessionProps {
@@ -37,6 +51,7 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({ initialTask, onC
   const [agentObservations, setAgentObservations] = useState<Observation[]>([]);
   const [currentStreaming, setCurrentStreaming] = useState<string | null>(null);
   const [showHelp, setShowHelp] = useState(true);
+  const [currentToolCalls, setCurrentToolCalls] = useState<ToolCall[]>([]);
   
   const runtimeRef = useRef<AgentRuntime | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -162,6 +177,7 @@ Your name is Blonde. Respond to the user's question in a conversational way.
     const userMsgId = addMessage('user', `run: ${task}`);
     setIsAgentRunning(true);
     setAgentStatus('planning');
+    setCurrentToolCalls([]);
     
     try {
       const runtime = await initializeRuntime();
@@ -177,12 +193,17 @@ Your name is Blonde. Respond to the user's question in a conversational way.
         
         if (event.type === 'llm_response') {
           if (event.parsed.type === 'tool_call') {
-            const toolMsgId = addMessage(
-              'tool', 
-              `🔧 ${event.parsed.tool}(${JSON.stringify(event.parsed.args)})`,
-              false,
-              event.parsed.tool
-            );
+            // Add to tool call chain
+            const newToolCall: ToolCall = {
+              id: String(Date.now()),
+              tool: event.parsed.tool,
+              args: event.parsed.args,
+              status: 'running',
+              timestamp: new Date(),
+            };
+            setCurrentToolCalls(prev => [...prev, newToolCall]);
+            
+            addMessage('system', `🔧 ${event.parsed.tool}(${JSON.stringify(event.parsed.args)})`, false, event.parsed.tool);
           } else if (event.parsed.type === 'answer') {
             addMessage('assistant', event.parsed.content, false);
           }
@@ -190,11 +211,19 @@ Your name is Blonde. Respond to the user's question in a conversational way.
         
         if (event.type === 'observation_ready') {
           setAgentObservations(prev => [...prev, event.observation]);
-          const obsMsgId = addMessage(
-            'system',
-            `${event.observation.success ? '✓' : '✗'} ${event.observation.summary}`,
-            false
-          );
+          
+          // Update the last tool call with result
+          setCurrentToolCalls(prev => {
+            const updated = [...prev];
+            const lastCall = updated[updated.length - 1];
+            if (lastCall) {
+              lastCall.status = event.observation.success ? 'success' : 'error';
+              lastCall.result = event.observation.summary;
+            }
+            return updated;
+          });
+          
+          addMessage('system', `${event.observation.success ? '✓' : '✗'} ${event.observation.summary}`, false);
         }
         
         if (event.type === 'complete') {
@@ -211,6 +240,7 @@ Your name is Blonde. Respond to the user's question in a conversational way.
       setIsAgentRunning(false);
       setAgentStatus('idle');
       setAgentPlan(null);
+      setCurrentToolCalls([]);
     }
   }, [addMessage, initializeRuntime]);
 
@@ -353,24 +383,13 @@ Your name is Blonde. Respond to the user's question in a conversational way.
 
   return (
     <Box flexDirection="column" height="100%">
-      {/* Header */}
-      <Box
-        borderStyle="round"
-        borderColor={colors.border}
-        paddingX={2}
-        paddingY={0}
-      >
-        <Text bold color={colors.brand}>BLONDE</Text>
-        <Text dimColor> / </Text>
-        {isAgentRunning ? (
-          <>
-            <Text color={colors.thinking}>{icons.thinking} Agent running</Text>
-            <Text dimColor> ({agentStatus})</Text>
-          </>
-        ) : (
-          <Text color={colors.success}>Ready</Text>
-        )}
-      </Box>
+      {/* Header - responsive to terminal size */}
+      <Header 
+        isAgentRunning={isAgentRunning}
+        agentStatus={agentStatus}
+        agentPlan={agentPlan}
+        isFullscreen={true}
+      />
 
       {/* Messages */}
       <Box
@@ -381,21 +400,52 @@ Your name is Blonde. Respond to the user's question in a conversational way.
         paddingX={2}
         paddingY={1}
         flexGrow={1}
+        overflow="hidden"
       >
+        {/* Show plan if available */}
+        {agentPlan && isAgentRunning && (
+          <Box marginBottom={1}>
+            <PlanDisplay steps={agentPlan.steps} currentStep={agentPlan.currentStep} />
+          </Box>
+        )}
+        
+        {/* Show tool call chain if running - inline style */}
+        {currentToolCalls.length > 0 && (
+          <Box marginBottom={1} flexDirection="column">
+            <ToolCallLogChain calls={currentToolCalls} />
+          </Box>
+        )}
+        
         {messages.map((msg) => (
           <Box key={msg.id} flexDirection="column" marginBottom={1}>
-            <Box>
-              {msg.role === 'user' && <Text bold color={colors.brand}>You: </Text>}
-              {msg.role === 'assistant' && <Text bold color={colors.working}>Blonde: </Text>}
-              {msg.role === 'system' && <Text bold color={colors.textMuted}>System: </Text>}
-              {msg.role === 'tool' && <Text bold color={colors.warning}>🔧 {msg.toolName}: </Text>}
-            </Box>
-            <Box marginLeft={2}>
-              <Text color={msg.role === 'system' ? colors.textMuted : colors.text}>
-                {msg.content}
-                {msg.isStreaming && <Text color={colors.thinking}>▌</Text>}
-              </Text>
-            </Box>
+            {msg.role === 'user' && (
+              <Box>
+                <Text bold color={colors.brand}>You: </Text>
+                <Text color={colors.text}>{msg.content}</Text>
+              </Box>
+            )}
+            {msg.role === 'assistant' && (
+              <Box flexDirection="column">
+                <Box>
+                  <Text bold color={colors.working}>Blonde: </Text>
+                </Box>
+                <Box marginLeft={2} flexWrap="wrap">
+                  <Text color={colors.text}>{msg.content}</Text>
+                  {msg.isStreaming && <Text color={colors.thinking}>▌</Text>}
+                </Box>
+              </Box>
+            )}
+            {msg.role === 'system' && (
+              <Box>
+                <Text dimColor>{'>'} </Text>
+                <Text color={colors.textMuted}>{msg.content}</Text>
+              </Box>
+            )}
+            {msg.role === 'tool' && (
+              <Box marginLeft={2}>
+                <Text bold color={colors.warning}>🔧 {msg.toolName}: </Text>
+              </Box>
+            )}
           </Box>
         ))}
       </Box>
@@ -422,7 +472,7 @@ Your name is Blonde. Respond to the user's question in a conversational way.
         <Box marginTop={1} paddingX={2} flexDirection="column">
           <Text dimColor>
             <Text bold>Commands: </Text>
-            <Text color={colors.brand}>run: &lt;task&gt;</Text> start agent
+            <Text color={colors.brand}>run: task</Text> start agent
             {' | '}
             <Text bold>stop</Text> stop agent
             {' | '}

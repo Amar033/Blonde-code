@@ -89,7 +89,8 @@ export class LLMClient{
     observations: string[], 
     availableTools: Tool[], 
     userInput?: string,
-    toolCallHistory?: string
+    toolCallHistory?: string,
+    forceSynthesis?: boolean
   ): Promise<PlannerResponse> {
     const toolDescriptions = this.formatToolsForLLM(availableTools);
     
@@ -105,6 +106,10 @@ export class LLMClient{
     const historyNote = toolCallHistory 
       ? `\nTOOLS ALREADY CALLED:\n${toolCallHistory}\n\nIMPORTANT: Don't call a tool again with the same arguments! If you just called it, analyze the result instead.\n`
       : '';
+    
+    const synthesisWarning = forceSynthesis
+      ? `\n⚠️ CRITICAL: You have gathered ${observations.length} observations! This is enough to answer the user. STOP calling tools and provide your final answer now. If you need ONE more specific piece of info, get it and then answer.\n`
+      : '';
   
     const prompt = `You are executing a plan to help the user. You have access to these tools:
 
@@ -119,6 +124,7 @@ OBSERVATIONS FROM PREVIOUS ACTIONS:
 ${observations.length > 0  ? observations.map((o, i) => `${i + 1}. ${o}`).join('\n'): 'None yet - this is the first action.'}
 ${loopWarning}
 ${historyNote}
+${synthesisWarning}
 
 YOUR JOB:
 - Execute the plan step by step using the available tools
@@ -137,7 +143,8 @@ CRITICAL RULES:
 2. If the observation shows files, paths, or results - USE THAT INFORMATION in your answer
 3. If you have the information the user asked for, return {"type": "answer"} - don't call more tools!
 4. Don't call the same tool twice with the same arguments - that's looping!
-5. Know when to stop - you don't need more tools if the task is complete!`;
+5. Know when to stop - you don't need more tools if the task is complete!
+${forceSynthesis ? '6. STOP NOW - You have enough information. Answer the user!' : ''}`;
 
     const response = await this.provider.call(prompt, {
       mode: 'act',
