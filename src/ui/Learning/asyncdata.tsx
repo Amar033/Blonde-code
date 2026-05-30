@@ -58,7 +58,7 @@ const App=()=>{
   <Box flexDirection="column" padding={1}>
     <Text bold>Async agent simulation</Text>
       {/* Current Status */}
-      <Box amrginTop={1} borderStyle="round" borderColor={getStatusColor(currentState)} padding={1}>
+      <Box marginTop={1} borderStyle="round" borderColor={getStatusColor(currentState)} padding={1}>
         {isComplete && (
         <Text color="green" bold>
           ✓ complete 

@@ -27,7 +27,7 @@ const App=()=>{
       {loading?(
       <Box marginTop={1} flexDirection="column">
         <Box>
-          <Text colour="cyan">
+          <Text color="cyan">
             <Spinner type="dots"/> Loading ..
           </Text>
         </Box>
@@ -42,7 +42,7 @@ const App=()=>{
       ):(
       <Box marginTop={1} backgroundColor="green" borderStyle="round" padding={1}>
             {/* for check mark the unicode is u2713*/}
-        <Text colour="white" bold>✓ Loading Completed</Text>
+        <Text color="white" bold>✓ Loading Completed</Text>
       </Box>
       )}
   </Box>

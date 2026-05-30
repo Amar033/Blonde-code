@@ -1,62 +1,68 @@
-import type {LLMProvider, LLMCallOptions, LLMResponse, LLMStreamDelta} from './providers/base.js';
-import type {PlannerResponse } from '../types/events.js';
+import type {LLMProvider, LLMCallOptions, LLMStreamDelta} from './providers/base.js';
+import type {PlannerResponse} from '../types/events.js';
 import {OpenRouterProvider} from './providers/openrouter.js';
 import {OllamaProvider} from './providers/ollama.js';
 import {Tool} from '../tools/base.js';
-/**
- * LLM Client 
- * This wraps all the providers and provides clean interface to the agent.
- */
+import type {AgentConfig} from '../agent/agent';
 
-export class LLMClient{
+export class LLMClient {
   private provider: LLMProvider;
-  constructor(provider: LLMProvider){
-    this.provider= provider;
+  private agentConfig?: AgentConfig;
+
+  constructor(provider: LLMProvider, agentConfig?: AgentConfig) {
+    this.provider = provider;
+    this.agentConfig = agentConfig;
   }
 
-  // create client from environment
-  static async fromEnv(): Promise<LLMClient> {
+  static async fromEnv(agentConfig?: AgentConfig): Promise<LLMClient> {
     const providerName = process.env.LLM_PROVIDER || 'ollama';
     const apikey = process.env.OPENROUTER_API_KEY;
-    const model = process.env.LLM_MODEL || 'qwen3.5:latest';
-    
+    const model = process.env.LLM_MODEL || 'qwen3:latest';
+
     if (providerName === 'ollama') {
       const baseURL = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
       const provider = new OllamaProvider(model, baseURL);
-    
+
       const available = await provider.isAvailable();
       if (!available) {
         throw new Error('Ollama server not running. Start it with: ollama serve');
       }
       console.log(`[LLM] Initialized with Ollama: ${model}`);
-      return new LLMClient(provider);
+      return new LLMClient(provider, agentConfig);
     }
 
-    if (!apikey){
+    if (!apikey) {
       throw new Error('OPENROUTER_API_KEY not set in .env');
     }
 
-    const provider = new OpenRouterProvider(apikey,model);
-      
-    //verification
-    const available =  await provider.isAvailable();
-    if (!available){
-      throw new Error (`Provider ${providerName} is not available`);
+    const provider = new OpenRouterProvider(apikey, model);
+
+    const available = await provider.isAvailable();
+    if (!available) {
+      throw new Error(`Provider ${providerName} is not available`);
     }
 
-    console.log(`LLMClient initialized with ${provider.name}`);
-    return new LLMClient(provider);
+    console.log(`[LLM] Initialized with ${provider.name}: ${model}`);
+    return new LLMClient(provider, agentConfig);
   }
 
-  // Check if provider supports streaming
+  private getTemperature(mode: 'plan' | 'act' | 'finalize'): number {
+    if (!this.agentConfig?.temperature) {
+      switch (mode) {
+        case 'plan':     return 0.7;
+        case 'act':      return 0.5;
+        case 'finalize': return 0.3;
+      }
+    }
+    return this.agentConfig.temperature;
+  }
+
   supportsStreaming(): boolean {
     return typeof this.provider.stream === 'function';
   }
 
-  // Stream a prompt - yields deltas for real-time display
   async *streamPrompt(prompt: string, options?: LLMCallOptions): AsyncGenerator<LLMStreamDelta, void, unknown> {
     if (!this.supportsStreaming()) {
-      // Fallback to non-streaming
       const response = await this.provider.call(prompt, options);
       yield { type: 'content', content: response.content };
       yield { type: 'done', content: '' };
@@ -65,52 +71,49 @@ export class LLMClient{
     yield* this.provider.stream!(prompt, options);
   }
 
-    // plan mode
-    async plan(input: string): Promise<PlannerResponse> {
-    const prompt = `You are a coding agent. Create a high-level plan to accomplish this task . UserRequest: ${input} 
-        Respond in JSON format:
-        {
-          "type": "plan",
-          "steps": ["step1", "step2", ...],
-          "reasoning": "why this approach",
-          "estimatedToolCalls": 5
-        }`;
+  async plan(input: string): Promise<PlannerResponse> {
+    const prompt = `You are a coding agent. Create a high-level plan to accomplish this task. UserRequest: ${input}
+Respond in JSON format:
+{
+  "type": "plan",
+  "steps": ["step1", "step2", ...],
+  "reasoning": "why this approach",
+  "estimatedToolCalls": 5
+}`;
     const response = await this.provider.call(prompt, {
       mode: 'plan',
-      temperature: 0.7,
+      temperature: this.getTemperature('plan'),
       maxTokens: 1500,
     });
     return this.parseResponse(response.content);
   }
 
-  //act mode
   async act(
-    plan: string, 
-    observations: string[], 
-    availableTools: Tool[], 
+    plan: string,
+    observations: string[],
+    availableTools: Tool[],
     userInput?: string,
     toolCallHistory?: string,
     forceSynthesis?: boolean
   ): Promise<PlannerResponse> {
     const toolDescriptions = this.formatToolsForLLM(availableTools);
-    
-    // Detect if we're looping on the same tool
-    const lastObservation = observations.length > 0 ? observations[observations.length - 1] : '';
-    const secondLastObservation = observations.length > 1 ? observations[observations.length - 2] : '';
-    
-    const loopWarning = (lastObservation && secondLastObservation && 
+
+    const lastObservation       = observations.at(-1) ?? '';
+    const secondLastObservation = observations.at(-2) ?? '';
+
+    const loopWarning = (lastObservation && secondLastObservation &&
       lastObservation.substring(0, 50) === secondLastObservation.substring(0, 50))
-      ? `\n⚠️ WARNING: You appear to be repeating the same action! If you've already tried this, try a DIFFERENT approach.\n`
+      ? `\n⚠️ WARNING: You appear to be repeating the same action! Try a DIFFERENT approach.\n`
       : '';
-    
-    const historyNote = toolCallHistory 
-      ? `\nTOOLS ALREADY CALLED:\n${toolCallHistory}\n\nIMPORTANT: Don't call a tool again with the same arguments! If you just called it, analyze the result instead.\n`
+
+    const historyNote = toolCallHistory
+      ? `\nTOOLS ALREADY CALLED:\n${toolCallHistory}\n\nIMPORTANT: Don't call a tool again with the same arguments!\n`
       : '';
-    
+
     const synthesisWarning = forceSynthesis
-      ? `\n⚠️ CRITICAL: You have gathered ${observations.length} observations! This is enough to answer the user. STOP calling tools and provide your final answer now. If you need ONE more specific piece of info, get it and then answer.\n`
+      ? `\n⚠️ CRITICAL: You have gathered ${observations.length} observations! STOP calling tools and provide your final answer now.\n`
       : '';
-  
+
     const prompt = `You are executing a plan to help the user. You have access to these tools:
 
 ${toolDescriptions}
@@ -121,14 +124,12 @@ CURRENT PLAN:
 ${plan}
 
 OBSERVATIONS FROM PREVIOUS ACTIONS:
-${observations.length > 0  ? observations.map((o, i) => `${i + 1}. ${o}`).join('\n'): 'None yet - this is the first action.'}
-${loopWarning}
-${historyNote}
-${synthesisWarning}
+${observations.length > 0 ? observations.map((o, i) => `${i + 1}. ${o}`).join('\n') : 'None yet - this is the first action.'}
+${loopWarning}${historyNote}${synthesisWarning}
 
 YOUR JOB:
 - Execute the plan step by step using the available tools
-- After each tool result, analyze the result and determine what to do next
+- After each tool result, analyze the result and decide what to do next
 - If you have the answer to the user's request, respond with {"type": "answer", "content": "your answer"}
 - If you need more info, respond with {"type": "need_info", "question": "what you need"}
 - Otherwise, call another tool or continue with the plan
@@ -148,142 +149,123 @@ ${forceSynthesis ? '6. STOP NOW - You have enough information. Answer the user!'
 
     const response = await this.provider.call(prompt, {
       mode: 'act',
-      temperature: 0.5,
+      temperature: this.getTemperature('act'),
       maxTokens: 1000,
     });
-  
+
     return this.parseResponse(response.content);
   }
 
-  // finalize mode 
   async finalize(plan: string, observations: string[]): Promise<PlannerResponse> {
-    const prompt = `You are a coding agent summarizing completed work. Plan : ${plan}
-        Observations:
-          ${observations.map((o,i)=> `${i+1}. ${o}`).join('\n')}
-        Summarize what was accomplished.
-        Respond in JSON:
-        {
-          "type":"answer",
-          "content":"summary of what was done"
-        }`;
+    const prompt = `You are a coding agent summarizing completed work.
+Plan: ${plan}
+Observations:
+${observations.map((o, i) => `${i + 1}. ${o}`).join('\n')}
+Summarize what was accomplished.
+Respond in JSON:
+{
+  "type": "answer",
+  "content": "summary of what was done"
+}`;
 
-  const response = await this.provider.call(prompt,{
+    const response = await this.provider.call(prompt, {
       mode: 'finalize',
-      temperature: 0.3,
+      temperature: this.getTemperature('finalize'),
       maxTokens: 800,
     });
     return this.parseResponse(response.content);
   }
 
-  // format the tools for llm 
-private formatToolsForLLM(tools: Tool[]): string {
-  const formattedTools = tools.map(tool => {
-    // Build arguments list
-    let argsList = '';
-    
-    if (tool.argsSchema?.properties) {
-      const entries = Object.entries(tool.argsSchema.properties);
-      argsList = entries
-        .map(([name, schema]: [string, any]) => {
-          const desc = schema.description || schema.type || 'unknown';
-          return `  - ${name}: ${desc}`;
-        })
-        .join('\n');
-    } else {
-      argsList = '  (no arguments)';
-    }
-    
-    const dangerWarning = tool.isDangerous ? ' ⚠️ DANGEROUS' : '';
-    const approvalNote = tool.requiresApproval ? 'Yes' : 'No';
-    
-    // Build the complete tool description
-    const lines = [
-      `Tool: ${tool.name}${dangerWarning}`,
-      `Description: ${tool.description}`,
-      'Arguments:',
-      argsList,
-      `Requires Approval: ${approvalNote}`
-    ];
-    
-    return lines.join('\n');
-  });
-  
-  return formattedTools.join('\n\n---\n\n');
-} 
-  private extractThinking(content: string) {
+  private formatToolsForLLM(tools: Tool[]): string {
+    return tools.map(tool => {
+      let argsList = '  (no arguments)';
+
+      if (tool.argsSchema?.properties) {
+        argsList = Object.entries(tool.argsSchema.properties)
+          .map(([name, schema]: [string, any]) => {
+            const desc = schema.description || schema.type || 'unknown';
+            return `  - ${name}: ${desc}`;
+          })
+          .join('\n');
+      }
+
+      const dangerTag  = tool.isDangerous      ? ' ⚠️ DANGEROUS' : '';
+      const approvalNote = tool.requiresApproval ? 'Yes' : 'No';
+
+      return [
+        `Tool: ${tool.name}${dangerTag}`,
+        `Description: ${tool.description}`,
+        'Arguments:',
+        argsList,
+        `Requires Approval: ${approvalNote}`,
+      ].join('\n');
+    }).join('\n\n---\n\n');
+  }
+
+  // Strips <think>…</think> blocks (Qwen) and Ollama "Thinking..." markers.
+  // Returns the extracted thinking text and the cleaned response body separately.
+  private extractThinking(content: string): { thinking: string | undefined; cleaned: string } {
     let thinking: string | undefined;
     let cleaned = content;
 
-    // Ollama format
-    const start = content.indexOf("Thinking...");
-    const end = content.indexOf("...done thinking.");
+    // Ollama format: "Thinking...<text>...done thinking."
+    const start = content.indexOf('Thinking...');
+    const end   = content.indexOf('...done thinking.');
 
     if (start !== -1 && end !== -1 && end > start) {
-      thinking = content
-        .slice(start + "Thinking...".length, end)
-        .trim();
-
-      cleaned =
-        content.slice(0, start) +
-        content.slice(end + "...done thinking.".length);
+      thinking = content.slice(start + 'Thinking...'.length, end).trim();
+      cleaned  = content.slice(0, start) + content.slice(end + '...done thinking.'.length);
     }
 
-    // Qwen <think> format fallback
+    // Qwen <think>…</think> format
     const thinkMatch = cleaned.match(/<think>([\s\S]*?)<\/think>/);
-
     if (thinkMatch) {
       thinking = thinkMatch[1].trim();
-      cleaned = cleaned.replace(/<think>[\s\S]*?<\/think>/g, "");
+      cleaned  = cleaned.replace(/<think>[\s\S]*?<\/think>/g, '');
     }
 
     return { thinking, cleaned: cleaned.trim() };
   }
 
-
-  // parse llm response => PlanenrResponse (handles the off chance that the llm returns garbage)
-  private parseResponse(content: string): PlannerResponse{
-    try{
-      console.log("RAW LLM RESPONSE:");
+  private parseResponse(content: string): PlannerResponse {
+    try {
+      console.log('RAW LLM RESPONSE:');
       console.log(content);
-      // extract thinking from qwen 
+
       let { thinking, cleaned } = this.extractThinking(content);
 
-      // remove markdown code blocks if it exists
-      cleaned = content.replace(/```json\n?/g, '' ).replace(/```\n?/g, '').trim();
+      // Strip markdown code fences if the model wrapped the JSON
+      cleaned = cleaned.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+
       const parsed = JSON.parse(cleaned);
 
-      //validates it and match with PlanenrResponseSchema
-      if (!parsed.type){
-        throw new Error ('Missing type field');
+      if (!parsed.type) {
+        throw new Error('Missing type field');
       }
 
-      // attach thinking if exist 
-      if (thinking && parsed.type === 'tool_call'){
+      if (thinking && parsed.type === 'tool_call') {
         (parsed as any).thinking = thinking;
       }
 
-      if (parsed.type ==='tool_call'){
-        if(!parsed.tool || !parsed.args){
-          throw new Error('tool_call missing required fields (tool,args');
+      if (parsed.type === 'tool_call') {
+        if (!parsed.tool || !parsed.args) {
+          throw new Error('tool_call missing required fields (tool, args)');
         }
       }
 
-      if (parsed.type ==='answer' || parsed.type === 'need_info'){
-        if(!parsed.content && !parsed.question){
-          throw new Error(`${parsed.type} missing content/question`); 
-        }  
+      if (parsed.type === 'answer' || parsed.type === 'need_info') {
+        if (!parsed.content && !parsed.question) {
+          throw new Error(`${parsed.type} missing content/question`);
+        }
       }
 
-      return parsed as PlannerResponse;        
-    } catch (error){
-      console.error ('[LLM] Failed to parse response:', content);
-      console.error ('[LLM] Error:', error);
+      return parsed as PlannerResponse;
+    } catch (error) {
+      console.error('[LLM] Failed to parse response:', content);
+      console.error('[LLM] Error:', error);
 
-      //  fallback 
-      return { 
-        type: 'answer',
-        content: content, 
-      };
+      // Last-resort fallback — surface raw text rather than silently dying
+      return { type: 'answer', content };
     }
   }
 }

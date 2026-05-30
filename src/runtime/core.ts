@@ -1,6 +1,6 @@
 // core event loop 
 
-import type {AgentState, Plan} from '../types/agent.js'
+import type {AgentState, Plan, Observation, ToolCall} from '../types/agent.js'
 import type {AgentEvent, PlannerResponse} from '../types/events.js'
 import {isState, isTerminal} from '../types/agent.js'
 import {LLMClient} from '../planner/llm-client.js'
@@ -8,19 +8,14 @@ import {PlanningStrategy} from '../runtime/strategies/planning-strategy.js'
 import {ChainOfThoughtStrategy} from '../runtime/strategies/planning-strategy.js'
 import {ToolRegistry} from '../tools/registry.js'
 import type {Tool} from '../tools/base.js'
+import type {AgentConfig} from '../agent/agent'
 // runtime configuration (global configuration for the runtime to prevebnt infinite loops and max iterations)
 export interface RuntimeConfig{
   maxTurns: number;
   maxLoopCount: number;
   maxConsecutiveErrors: number;
   debug: boolean;
-}
-
-export interface ExecutionSafety{
-  validateToolCall(call: ToolCall): ValidationResult;
-  requiresApproval(call: ToolCall): boolean;
-  canAbort(): boolean;
-  recordAction(action:Action): void; // for audit
+  agent?: string; // Agent to use for this runtime
 }
 
 // agent runtime, the core event loop
@@ -47,6 +42,7 @@ export class AgentRuntime {
   private abortController: AbortController | null = null;
   private approvalCallback: ApprovalCallback | null = null;
   private toolCallHistory: ToolCallRecord[] = [];
+  private agentName: string = 'build'; // Default agent
 
 
   constructor(toolRegistry: ToolRegistry, config: Partial<RuntimeConfig> = {}){
@@ -57,7 +53,9 @@ export class AgentRuntime {
       maxLoopCount: config.maxLoopCount ?? 5,
       maxConsecutiveErrors: config.maxConsecutiveErrors ?? 3,
       debug: config.debug ?? true,
+      agent: config.agent ?? 'build',
     };
+    this.agentName = this.config.agent ?? 'build';
     this.planningStrategy = new ChainOfThoughtStrategy();
   }
 
@@ -112,8 +110,11 @@ export class AgentRuntime {
   }
 
   async initialize(): Promise<void> {
-    this.llmClient = await LLMClient.fromEnv();
-    console.log('[Runtime] initialized with ', this.toolRegistry.getAllTools().length, 'Tools');
+    // Get the agent configuration
+    const { getAgent } = await import('../agent/agent');
+    const agentConfig = await getAgent(this.agentName);
+    this.llmClient = await LLMClient.fromEnv(agentConfig);
+    console.log('[Runtime] initialized with ', this.toolRegistry.getAllTools().length, 'Tools and agent:', this.agentName);
   }
 
   // Stream LLM response and yield events for each token
@@ -237,18 +238,19 @@ export class AgentRuntime {
     // yield acting phase
     yield* this.actingPhase(input, ac.signal);
 
-    // emit final Result
-    if (this.state.status == 'completed'){
-      const completeEvent: AgnetEvent = {
+    // Cast to full union to reset the plan_ready narrowing TypeScript holds after the early-return check above
+    const finalState = this.state as AgentState;
+    if (finalState.status === 'completed'){
+      const completeEvent: AgentEvent = {
         type: 'complete',
-        finalResponse: this.state.finalAnswer
+        finalResponse: finalState.finalAnswer
       };
       yield completeEvent;
       this.emit(completeEvent);
-    } else if (this.state.status=== 'aborted'){
-      const abortEvent: AgnetEvent={
+    } else if (finalState.status === 'aborted'){
+      const abortEvent: AgentEvent = {
         type: 'abort',
-        reason: this.state.reason
+        reason: finalState.reason
       };
       yield abortEvent;
       this.emit(abortEvent);
@@ -386,10 +388,10 @@ export class AgentRuntime {
       if (turn >= this.config.maxTurns){
         this.state={
           status: 'aborted',
-          reason: `${this.config.maxConsecutiveErrors} Consecutive Errors`,
+          reason: `Max turns (${this.config.maxTurns}) exceeded`,
           turn
         };
-        console.log('[Runtime] Aborted too many errors');
+        console.log('[Runtime] Aborted: max turns exceeded');
         break;
       }
 
@@ -414,8 +416,9 @@ export class AgentRuntime {
         // Check for abort before LLM call
         signal.throwIfAborted();
         
+        const planText = `Steps:\n${plan.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n\nReasoning: ${plan.reasoning}`;
         const response = await this.llmClient!.act(
-          plan.reasoning,
+          planText,
           observationSummaries,
           availableTools,
           userInput,
@@ -515,7 +518,7 @@ export class AgentRuntime {
           // validation and execution
           const observation = await this.executeToolCall(toolCall, plan, observations, turn);
 
-          if (observations){
+          if (observation){
             observations.push(observation);
 
             const obsEvent: AgentEvent={
@@ -539,7 +542,7 @@ export class AgentRuntime {
           break;
         }
       }catch (error){
-        console.error('[Runtime] Act mode error:, error');
+        console.error('[Runtime] Act mode error:', error);
         this.state={
           status: 'aborted',
           reason: `Act mode Failed: ${error}`,
@@ -584,11 +587,11 @@ export class AgentRuntime {
     // validating args
     const validation = tool.validate(toolCall.args);
     if(!validation.valid){
-      console.error(`[Runtime] Tool ${toolCall.name}:`, validation.errors );
+      console.error(`[Runtime] Tool ${toolCall.name}:`, validation.errors);
       return this.createErrorObservation(
         toolCall.name,
         toolCall.args,
-        `Invalid args: ${validation.errors.join(' ,')}`
+        `Invalid args: ${(validation.errors ?? []).join(', ')}`
       );
     }
 
@@ -767,7 +770,7 @@ export class AgentRuntime {
 
   // check if consecutive errors came in 
    private hasConsecutiveErrors(observations: Observation[], n: number): boolean{
-    if(observation.length<n)return false;
+    if(observations.length<n)return false;
     const lastN = observations.slice(-n);
     return lastN.every(o=>!o.success);
   }
@@ -780,15 +783,14 @@ export class AgentRuntime {
 
     // for now only simple flow
     if (isState(current, 'waiting_for_input') && event.type === 'user_input'){
-      return {status: 'planning', thought: event.input, turn: 1 };
+      return {status: 'planning', thought: event.input};
     }
 
     if (isState(current, 'planning') && event.type === 'llm_response'){
-      // now its just complete, later we will generate plan and plan_ready
       return {
         status: 'completed',
         finalAnswer: event.parsed.type === 'answer' ? event.parsed.content : 'Done',
-        turn: current.turn 
+        turn: 1
       };
     }
 

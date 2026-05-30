@@ -1,4 +1,4 @@
-import type {LLMProvider, LLMCallOptions, LLMResponse} from '../base.js';
+import type {LLMProvider, LLMCallOptions, LLMResponse} from './base.js';
 
 /**
  * Uses open ai sdk (was the initial plan) with openrouter api has free model calls till 100 times a day 
@@ -98,7 +98,7 @@ export class OpenRouterProvider implements LLMProvider{
               {
               "type": "tool_call",
               "tool": "tool_name",
-              "args": {"arg1", "value1"},
+              "args": {"arg1": "value1"},
               "requiresApproval": true, 
               "reasoning": "why this tool call"
             }

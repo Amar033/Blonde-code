@@ -11,9 +11,9 @@ const App=()=>{
       
         <Text>Row Layout:</Text>
         <Box flexDirection= "row" gap= {2}>
-          <Text colour = "red">Red</Text>
-          <Text colour = "green">Green</Text>
-          <Text colour = "blue">Blue</Text>
+          <Text color = "red">Red</Text>
+          <Text color = "green">Green</Text>
+          <Text color = "blue">Blue</Text>
         </Box>
     </Box>
 
@@ -21,9 +21,9 @@ const App=()=>{
     <Box marginTop={1} flexDirection = "column">
       <Text>Column Layout</Text>
         <Box flexDirection="column">
-          <Text colour="red">Red</Text>
-          <Text colour="green">Green</Text>
-          <Text colour="blue"></Text>
+          <Text color="red">Red</Text>
+          <Text color="green">Green</Text>
+          <Text color="blue"></Text>
         </Box>
     </Box>
       
