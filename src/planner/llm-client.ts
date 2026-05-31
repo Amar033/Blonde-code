@@ -17,7 +17,7 @@ export class LLMClient {
   static async fromEnv(agentConfig?: AgentConfig): Promise<LLMClient> {
     const providerName = process.env.LLM_PROVIDER || 'ollama';
     const apikey = process.env.OPENROUTER_API_KEY;
-    const model = process.env.LLM_MODEL || 'qwen3:latest';
+    const model = process.env.LLM_MODEL || 'qwen3.5:latest';
 
     if (providerName === 'ollama') {
       const baseURL = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
@@ -27,7 +27,6 @@ export class LLMClient {
       if (!available) {
         throw new Error('Ollama server not running. Start it with: ollama serve');
       }
-      console.log(`[LLM] Initialized with Ollama: ${model}`);
       return new LLMClient(provider, agentConfig);
     }
 
@@ -42,7 +41,6 @@ export class LLMClient {
       throw new Error(`Provider ${providerName} is not available`);
     }
 
-    console.log(`[LLM] Initialized with ${provider.name}: ${model}`);
     return new LLMClient(provider, agentConfig);
   }
 
@@ -71,8 +69,17 @@ export class LLMClient {
     yield* this.provider.stream!(prompt, options);
   }
 
+  // Build the system prompt: agent's configured prompt (if any) prepended to the mode-specific one
+  private buildSystemPrompt(modePrompt: string): string {
+    const agentPrompt = this.agentConfig?.prompt;
+    return agentPrompt ? `${agentPrompt}\n\n---\n\n${modePrompt}` : modePrompt;
+  }
+
   async plan(input: string): Promise<PlannerResponse> {
-    const prompt = `You are a coding agent. Create a high-level plan to accomplish this task. UserRequest: ${input}
+    const systemPrompt = this.buildSystemPrompt(
+      'You are a strategic planning assistant. Analyze the user request and create a high-level plan. Always respond in valid JSON format.'
+    );
+    const prompt = `Create a high-level plan to accomplish this task. UserRequest: ${input}
 Respond in JSON format:
 {
   "type": "plan",
@@ -82,6 +89,7 @@ Respond in JSON format:
 }`;
     const response = await this.provider.call(prompt, {
       mode: 'plan',
+      systemPrompt,
       temperature: this.getTemperature('plan'),
       maxTokens: 1500,
     });
@@ -147,8 +155,12 @@ CRITICAL RULES:
 5. Know when to stop - you don't need more tools if the task is complete!
 ${forceSynthesis ? '6. STOP NOW - You have enough information. Answer the user!' : ''}`;
 
+    const systemPrompt = this.buildSystemPrompt(
+      'You are an execution assistant for a coding agent. Decide the next action based on the plan, tools, and observations. Always respond in valid JSON format.'
+    );
     const response = await this.provider.call(prompt, {
       mode: 'act',
+      systemPrompt,
       temperature: this.getTemperature('act'),
       maxTokens: 1000,
     });
@@ -168,8 +180,12 @@ Respond in JSON:
   "content": "summary of what was done"
 }`;
 
+    const systemPrompt = this.buildSystemPrompt(
+      'You are a summarization assistant. Review completed work and provide a clear summary. Always respond in valid JSON format.'
+    );
     const response = await this.provider.call(prompt, {
       mode: 'finalize',
+      systemPrompt,
       temperature: this.getTemperature('finalize'),
       maxTokens: 800,
     });
@@ -228,43 +244,65 @@ Respond in JSON:
   }
 
   private parseResponse(content: string): PlannerResponse {
-    try {
-      console.log('RAW LLM RESPONSE:');
-      console.log(content);
+    let thinking: string | undefined;
+    let cleaned: string;
 
-      let { thinking, cleaned } = this.extractThinking(content);
+    try {
+      ({ thinking, cleaned } = this.extractThinking(content));
 
       // Strip markdown code fences if the model wrapped the JSON
       cleaned = cleaned.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
 
       const parsed = JSON.parse(cleaned);
 
-      if (!parsed.type) {
-        throw new Error('Missing type field');
-      }
+      if (!parsed.type) throw new Error('Missing type field');
 
       if (thinking && parsed.type === 'tool_call') {
         (parsed as any).thinking = thinking;
       }
 
-      if (parsed.type === 'tool_call') {
-        if (!parsed.tool || !parsed.args) {
-          throw new Error('tool_call missing required fields (tool, args)');
-        }
+      if (parsed.type === 'tool_call' && (!parsed.tool || !parsed.args)) {
+        throw new Error('tool_call missing required fields (tool, args)');
       }
 
-      if (parsed.type === 'answer' || parsed.type === 'need_info') {
-        if (!parsed.content && !parsed.question) {
-          throw new Error(`${parsed.type} missing content/question`);
-        }
+      if ((parsed.type === 'answer' || parsed.type === 'need_info') && !parsed.content && !parsed.question) {
+        throw new Error(`${parsed.type} missing content/question`);
       }
 
       return parsed as PlannerResponse;
-    } catch (error) {
-      console.error('[LLM] Failed to parse response:', content);
-      console.error('[LLM] Error:', error);
+    } catch {
+      // JSON is malformed (often an unescaped " inside the content field from small models).
+      // Try to salvage a readable answer by extracting the content value via regex.
+      const src = (typeof cleaned! === 'string' ? cleaned! : content);
 
-      // Last-resort fallback — surface raw text rather than silently dying
+      const typeMatch = src.match(/"type"\s*:\s*"(\w+)"/);
+      const type = typeMatch?.[1];
+
+      if (type === 'tool_call') {
+        const toolMatch = src.match(/"tool"\s*:\s*"([^"]+)"/);
+        // Can't safely reconstruct args — return a no-op so the runtime can recover
+        return { type: 'answer', content: toolMatch
+          ? `[Could not parse tool call for "${toolMatch[1]}". The model may have generated invalid JSON.]`
+          : '[Could not parse tool call — invalid JSON from model.]' };
+      }
+
+      // For answer/plan/etc — extract the raw text after `"content": "`
+      const contentIdx = src.indexOf('"content"');
+      if (contentIdx !== -1) {
+        const afterKey = src.slice(contentIdx + '"content"'.length).replace(/^\s*:\s*"/, '');
+        const extracted = afterKey
+          .replace(/\\n/g, '\n')
+          .replace(/\\t/g, '\t')
+          .replace(/\\r/g, '')
+          .replace(/\\"/g, '"')
+          .replace(/"\s*}?\s*$/, '')
+          .trim();
+        if (extracted.length > 10) {
+          return { type: 'answer', content: extracted };
+        }
+      }
+
+      // Absolute fallback — return the raw text (toLines will still render it readably)
       return { type: 'answer', content };
     }
   }

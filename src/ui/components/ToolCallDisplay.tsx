@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text } from 'ink';
 
 interface ToolCallBlockProps {
   toolName: string;
@@ -47,13 +47,6 @@ export const ToolCallBlock: React.FC<ToolCallBlockProps> = ({
     }
     return JSON.stringify(args, null, 2);
   };
-
-  // Handle expand toggle
-  useInput((input, key) => {
-    if (key.return) {
-      setExpanded(!expanded);
-    }
-  });
 
   return (
     <Box flexDirection="column" marginY={0}>

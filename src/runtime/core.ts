@@ -104,7 +104,6 @@ export class AgentRuntime {
   // emit event to all listeners 
   private emit(event: AgentEvent): void {
     if (this.config.debug){
-      console.log('[EVENT]',event.type,event)
     }
     this.eventListeners.forEach(listener => listener(event));
   }
@@ -114,7 +113,6 @@ export class AgentRuntime {
     const { getAgent } = await import('../agent/agent');
     const agentConfig = await getAgent(this.agentName);
     this.llmClient = await LLMClient.fromEnv(agentConfig);
-    console.log('[Runtime] initialized with ', this.toolRegistry.getAllTools().length, 'Tools and agent:', this.agentName);
   }
 
   // Stream LLM response and yield events for each token
@@ -230,7 +228,6 @@ export class AgentRuntime {
     }
 
     if (this.state.status !== 'plan_ready'){
-      console.log('[Runtime] Planning failed, aborting');
       yield { type: 'abort', reason: 'Planning failed' };
       return; 
     }
@@ -284,7 +281,6 @@ export class AgentRuntime {
   private async * planningPhase(input:string, signal: AbortSignal): AsyncGenerator<AgentEvent>{
     this.state = {status: 'planning', thought: input};
     try{
-      console.log('[Runtime] Calling llm in planm mode');
       
       // Check for abort
       signal.throwIfAborted();
@@ -368,7 +364,6 @@ export class AgentRuntime {
     let loopCount=0;
     let turn = this.state.turn;
 
-    console.log('[Runtime] Starting acting phase...');
 
     // acting loop 
     while (true){
@@ -381,7 +376,6 @@ export class AgentRuntime {
           reason: `Max loop count (${this.config.maxLoopCount}) exceeded`,
           turn 
         };
-        console.log('[Runtime] Aborted: max loop count');
         break;
       }
 
@@ -391,7 +385,6 @@ export class AgentRuntime {
           reason: `Max turns (${this.config.maxTurns}) exceeded`,
           turn
         };
-        console.log('[Runtime] Aborted: max turns exceeded');
         break;
       }
 
@@ -405,7 +398,6 @@ export class AgentRuntime {
 
       const availableTools = this.toolRegistry.getAllTools();
 
-      console.log(`[Runtime] Act mode (loop ${loopCount}, turn ${turn})...`);
       const observationSummaries= observations.map(o=>o.summary);
       const toolCallHistorySummary = this.getToolCallSummary();
       
@@ -438,7 +430,6 @@ export class AgentRuntime {
         this.emit(llmEvent);
 
         if(response.type === 'answer'){
-          console.log('[Runtime] LLM returned final answer');
           this.state= {
             status: 'completed',
             finalAnswer: response.content,
@@ -447,7 +438,6 @@ export class AgentRuntime {
           break;
         } else if (response.type === 'need_info'){
           //  Need user input (futre: pause ans wait)
-          console.log('[Runtime] LLM needs more info:', response.question);
           this.state={
             status: 'aborted',
             reason: `Need more info: ${response.question}`,
@@ -462,11 +452,9 @@ export class AgentRuntime {
             reasoning: response.reasoning,
           };
 
-          console.log(`[Runtime] Tool Call: ${toolCall.name}(${JSON.stringify(toolCall.args)})`);
 
           // Check for duplicate/looping tool call
           if (this.isDuplicateToolCall(toolCall.name, toolCall.args)) {
-            console.warn('[Runtime] Duplicate tool call detected, aborting');
             this.state = {
               status: 'aborted',
               reason: `Duplicate tool call: ${toolCall.name} with same arguments`,
@@ -476,7 +464,6 @@ export class AgentRuntime {
           }
 
           if (this.isLoopingOnSimilarActions()) {
-            console.warn('[Runtime] Looping on similar actions detected, aborting');
             this.state = {
               status: 'aborted',
               reason: `Looping detected: repeatedly calling same tool with same arguments`,
@@ -597,7 +584,6 @@ export class AgentRuntime {
 
     // approval check 
     if (toolCall.requiresApproval || tool.isDangerous){
-      console.warn(`[Runtime] Tool ${toolCall.name} requires approval(autoapproving for now)`);
       // need to implement approval flow
     }
 
@@ -611,7 +597,6 @@ export class AgentRuntime {
     };
 
     try {
-      console.log(`[Runtime] Executing: ${toolCall.name}`);
       const result = await tool.execute(toolCall.args);
 
       // create observation
@@ -795,7 +780,6 @@ export class AgentRuntime {
     }
 
     // no valid transition case: stay in current state
-    console.warn('[WARN] No valid transition for ', current.status, event.type);
     return current;
   }
 

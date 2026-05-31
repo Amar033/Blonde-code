@@ -68,7 +68,7 @@ export const Header: React.FC<HeaderProps> = ({
           ) : (
             <Text color={colors.success}>Ready</Text>
           )}
-          <Text dimColor> {' │ '.padStart(width - 30)}</Text>
+          <Text dimColor> {width > 35 ? ' │ '.padStart(width - 30) : ''}</Text>
           <Text dimColor>Rows: {stdout?.rows || 0}</Text>
         </Box>
         
