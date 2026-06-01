@@ -56,14 +56,16 @@ export class WebSearchTool extends BaseTool {
     }
 
     try {
-      // Use DuckDuckGo HTML (no API key needed)
       const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}&kl=us-en`;
-      
+
       const response = await fetch(searchUrl, {
         method: 'GET',
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Accept': 'text/html',
+          'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5',
+          // Without Referer, DDG returns its homepage instead of search results
+          'Referer': 'https://duckduckgo.com/',
         },
       });
 
@@ -111,34 +113,41 @@ export class WebSearchTool extends BaseTool {
     snippet: string;
   }> {
     const results: Array<{ title: string; url: string; snippet: string }> = [];
-    
-    // Simple regex-based parsing (DuckDuckGo HTML format)
-    const resultRegex = /<a class="result__a" href="([^"]+)"[^>]*>([^<]+)<\/a>[\s\S]*?<a class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
-    
-    let match;
-    while ((match = resultRegex.exec(html)) && results.length < limit) {
-      const url = match[1];
-      const title = this.stripHtml(match[2]).trim();
-      const snippet = this.stripHtml(match[3]).trim();
-      
-      if (title && url) {
-        results.push({ title, url, snippet });
-      }
-    }
 
-    // Fallback: simpler parsing
-    if (results.length === 0) {
-      const titleRegex = /<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>([^<]+)<\/a>/g;
-      while ((match = titleRegex.exec(html)) && results.length < limit) {
-        results.push({
-          url: match[1],
-          title: this.stripHtml(match[2]).trim(),
-          snippet: '',
-        });
-      }
+    // DDG HTML structure (2024+):
+    //   <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=ENCODED_URL&rut=...">TITLE</a>
+    //   <a class="result__snippet" href="...">SNIPPET (may contain <b> tags)</a>
+    const titleRegex = /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
+
+    let match;
+    while ((match = titleRegex.exec(html)) && results.length < limit) {
+      const rawHref = match[1];
+      const title   = this.stripHtml(match[2]).trim();
+      if (!title) continue;
+
+      const url = this.extractRealUrl(rawHref);
+
+      // Find the snippet that follows this title link
+      const afterTitle = html.slice(match.index + match[0].length);
+      const snippetMatch = afterTitle.match(/<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/);
+      const snippet = snippetMatch ? this.stripHtml(snippetMatch[1]).trim() : '';
+
+      results.push({ title, url, snippet });
     }
 
     return results;
+  }
+
+  // DDG wraps real URLs as: //duckduckgo.com/l/?uddg=URL_ENCODED_URL&rut=...
+  private extractRealUrl(href: string): string {
+    try {
+      const uddg = href.match(/[?&]uddg=([^&]+)/)?.[1];
+      if (uddg) return decodeURIComponent(uddg);
+    } catch {
+      // fall through
+    }
+    // Already a normal URL or unknown format — return as-is
+    return href.startsWith('//') ? `https:${href}` : href;
   }
 
   private stripHtml(html: string): string {

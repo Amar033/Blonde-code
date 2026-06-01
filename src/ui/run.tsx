@@ -24,22 +24,22 @@ const { unmount, waitUntilExit } = render(<App />, {
   strict: false,
 });
 
+function restoreTerminal() {
+  // Show cursor + disable raw mode in case Ink left it active
+  process.stdout.write('\x1b[?25h'); // show cursor
+  process.stdout.write('\x1b[0m');   // reset colors
+  process.stdout.write('\n');        // move to clean line
+}
+
+let shuttingDown = false;
 async function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
   unmount();
-  try {
-    await waitUntilExit();
-  } catch (e) {
-    // ignore
-  }
+  restoreTerminal();
+  try { await waitUntilExit(); } catch { /* ignore */ }
   process.exit(0);
 }
 
-process.on('SIGINT', () => {
-  console.log('\nShutting down gracefully...');
-  shutdown();
-});
-
-process.on('SIGTERM', () => {
-  console.log('\nShutting down gracefully...');
-  shutdown();
-});
+process.on('SIGINT',  () => shutdown());
+process.on('SIGTERM', () => shutdown());

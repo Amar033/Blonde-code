@@ -24,8 +24,22 @@ export class EditFileTool extends BaseTool {
     required: ['path', 'find', 'replace'],
   };
 
-  isDangerous = true;  // Modifies existing files
-  requiresApproval = true;  // Should ask before executing
+  isDangerous = true;
+  requiresApproval = true;
+
+  validate(args: unknown): import('./base.js').ValidationResult {
+    const base = super.validate(args);
+    if (!base.valid) return base;
+
+    const { find } = args as { find?: string };
+    if (!find || find.trim() === '') {
+      return {
+        valid: false,
+        errors: ['The "find" field cannot be empty — read the file first, then use exact text from it as the "find" value.'],
+      };
+    }
+    return { valid: true };
+  }
 
   private blockedPaths = [
     'node_modules',

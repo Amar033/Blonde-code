@@ -79,14 +79,17 @@ export class LLMClient {
     const systemPrompt = this.buildSystemPrompt(
       'You are a strategic planning assistant. Analyze the user request and create a high-level plan. Always respond in valid JSON format.'
     );
-    const prompt = `Create a high-level plan to accomplish this task. UserRequest: ${input}
-Respond in JSON format:
-{
-  "type": "plan",
-  "steps": ["step1", "step2", ...],
-  "reasoning": "why this approach",
-  "estimatedToolCalls": 5
-}`;
+    const prompt = `Create a step-by-step plan for this task. Make autonomous decisions — do NOT ask the user for clarification.
+
+UserRequest: ${input}
+
+Rules:
+- If the request is vague (e.g. "edit any file"), pick one yourself and plan around it.
+- If the request asks to edit an existing file, plan to use edit_file (not write_file).
+- ALWAYS respond with type "plan". Never respond with "need_info" or "answer" here.
+
+Respond ONLY with this JSON (no markdown fences, no extra text):
+{"type":"plan","steps":["step1","step2"],"reasoning":"why this approach","estimatedToolCalls":3}`;
     const response = await this.provider.call(prompt, {
       mode: 'plan',
       systemPrompt,
@@ -148,12 +151,16 @@ Respond with ONE of these formats:
 {"type": "need_info", "question": "what you need from user"}
 
 CRITICAL RULES:
-1. If you just ran a tool and got a result, analyze it BEFORE calling another tool!
-2. If the observation shows files, paths, or results - USE THAT INFORMATION in your answer
-3. If you have the information the user asked for, return {"type": "answer"} - don't call more tools!
-4. Don't call the same tool twice with the same arguments - that's looping!
-5. Know when to stop - you don't need more tools if the task is complete!
-${forceSynthesis ? '6. STOP NOW - You have enough information. Answer the user!' : ''}`;
+1. Analyze each tool result before calling the next tool — never re-read a file you already read.
+2. EDITING an existing file: use edit_file (find exact text → replace). Do NOT use write_file unless creating a brand-new file.
+3. edit_file requires a non-empty "find" string — the exact text that currently exists in the file. Always read the file first, then copy a unique snippet as "find".
+4. When the user says "add a space", "add a line", "change a word" — read the file once, then call edit_file immediately.
+5. When asked to "choose any file" or given a vague instruction: make the choice yourself, do NOT ask.
+6. {"type":"need_info"} is BANNED for choices you can make autonomously. Only use it when the user must supply something you literally cannot guess (e.g. a password or API key).
+7. list_files shows subdirectory names — call list_files(subdir) to explore them.
+8. git_diff shows changes after an edit — use it to verify your work.
+9. NEVER repeat a tool call with the same arguments. If a web search returned 0 results, try a different query or conclude there is no data — do NOT search the same query again.
+${forceSynthesis ? '10. STOP NOW — provide your final answer immediately.' : ''}`;
 
     const systemPrompt = this.buildSystemPrompt(
       'You are an execution assistant for a coding agent. Decide the next action based on the plan, tools, and observations. Always respond in valid JSON format.'
