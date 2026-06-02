@@ -4,7 +4,6 @@ import TextInput from 'ink-text-input';
 import { colors } from '../design-system.js';
 import os from 'os';
 
-const MODEL    = process.env.LLM_MODEL    || 'qwen3.5:latest';
 const PROVIDER = process.env.LLM_PROVIDER || 'ollama';
 const CWD      = process.cwd().replace(os.homedir(), '~');
 
@@ -16,10 +15,47 @@ const EXAMPLES = [
 
 interface WelcomeScreenProps {
   onStart: (task: string) => void;
+  onShowSessions: () => void;
 }
 
-export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart }) => {
-  const [task, setTask] = useState('');
+export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onShowSessions }) => {
+  const [task,      setTask]      = useState('');
+  const [statusMsg, setStatusMsg] = useState('');
+  const [model,     setModel]     = useState(process.env.LLM_MODEL || 'qwen3.5:latest');
+
+  const handleSubmit = () => {
+    const v = task.trim();
+    if (!v) return;
+    setTask('');
+
+    if (v === '/sessions' || v === 'sessions') { onShowSessions(); return; }
+
+    if (v === '/model' || v === '/models') {
+      import('../../planner/providers/ollama.js').then(async ({ OllamaProvider, findOllamaModelsDirs }: any) => {
+        const p = new OllamaProvider(model, process.env.OLLAMA_BASE_URL || 'http://localhost:11434');
+        const [models, dirs] = await Promise.all([p.listModels(), findOllamaModelsDirs()]);
+        const modelsDir = dirs[0]?.path ?? process.env.OLLAMA_MODELS ?? '~/.ollama/models';
+        const parts = [`Current: ${model}`];
+        if (models.length > 0) parts.push(`Available: ${models.join(', ')}`);
+        parts.push(`Models dir: ${modelsDir}`);
+        parts.push(`/model <name> to switch`);
+        setStatusMsg(parts.join(' | '));
+      }).catch(() => setStatusMsg(`Current model: ${model} (via ${PROVIDER})`));
+      return;
+    }
+
+    if (v.startsWith('/model ')) {
+      const newModel = v.slice('/model '.length).trim();
+      if (newModel) {
+        process.env.LLM_MODEL = newModel;
+        setModel(newModel);
+        setStatusMsg(`Model set to ${newModel} — will apply to the next session`);
+      }
+      return;
+    }
+
+    onStart(v);
+  };
 
   return (
     <Box flexDirection="column">
@@ -37,7 +73,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart }) => {
           <Text bold color={colors.brand}>Blonde</Text>
           <Text dimColor>v0.1.0</Text>
           <Text dimColor>─</Text>
-          <Text dimColor>{PROVIDER} / {MODEL}</Text>
+          <Text dimColor>{PROVIDER} / {model}</Text>
           <Text dimColor>─</Text>
           <Text dimColor>{CWD}</Text>
         </Box>
@@ -82,9 +118,17 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart }) => {
         </Box>
       </Box>
 
+      {/* ── Command response ───────────────────────────────────── */}
+      {statusMsg && (
+        <Box marginTop={1} paddingX={1}>
+          <Text color={colors.warning}>{'! '}</Text>
+          <Text dimColor>{statusMsg}</Text>
+        </Box>
+      )}
+
       {/* ── Hint ───────────────────────────────────────────────── */}
       <Box marginTop={1} paddingX={1}>
-        <Text dimColor>? · help   /model · switch model</Text>
+        <Text dimColor>/sessions · previous chats   /model · list/switch model</Text>
       </Box>
 
       {/* ── Input ──────────────────────────────────────────────── */}
@@ -98,7 +142,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart }) => {
         <TextInput
           value={task}
           onChange={setTask}
-          onSubmit={() => { if (task.trim()) onStart(task.trim()); }}
+          onSubmit={handleSubmit}
           placeholder="What can I help you build today?"
         />
       </Box>

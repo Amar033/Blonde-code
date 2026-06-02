@@ -9,6 +9,7 @@ import {ChainOfThoughtStrategy} from '../runtime/strategies/planning-strategy.js
 import {ToolRegistry} from '../tools/registry.js'
 import type {Tool} from '../tools/base.js'
 import type {AgentConfig} from '../agent/agent'
+import {classifyIntent} from '../planner/intent-classifier.js'
 // runtime configuration (global configuration for the runtime to prevebnt infinite loops and max iterations)
 export interface RuntimeConfig{
   maxTurns: number;
@@ -32,6 +33,11 @@ interface ToolCallRecord {
   timestamp: Date;
 }
 
+export interface ConversationTurn {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 export class AgentRuntime {
   private state: AgentState;
   private config: RuntimeConfig;
@@ -42,7 +48,10 @@ export class AgentRuntime {
   private abortController: AbortController | null = null;
   private approvalCallback: ApprovalCallback | null = null;
   private toolCallHistory: ToolCallRecord[] = [];
-  private agentName: string = 'build'; // Default agent
+  private agentName: string = 'build';
+  // Sliding conversation history — kept across run() calls so the LLM knows what was discussed
+  private conversationHistory: ConversationTurn[] = [];
+  private readonly HISTORY_CHAR_LIMIT = 8000; // ~2k tokens, leaves headroom for plan/act prompts
 
 
   constructor(toolRegistry: ToolRegistry, config: Partial<RuntimeConfig> = {}){
@@ -64,13 +73,46 @@ export class AgentRuntime {
     this.approvalCallback = callback;
   }
 
-  // Public accessors for UI
   getRuntimeLLM(): LLMClient | undefined {
     return this.llmClient;
   }
-  
+
   getToolRegistry(): ToolRegistry {
     return this.toolRegistry;
+  }
+
+  getTokenUsage(): number {
+    return this.llmClient?.getTokenUsage() ?? 0;
+  }
+
+  async getContextWindow(): Promise<number> {
+    return this.llmClient?.getContextWindow() ?? 8192;
+  }
+
+  getConversationHistory(): ConversationTurn[] {
+    return [...this.conversationHistory];
+  }
+
+  loadConversationHistory(turns: ConversationTurn[]): void {
+    this.conversationHistory = [...turns];
+    // Apply the same sliding-window limit as pushHistory
+    while (
+      this.conversationHistory.reduce((n, t) => n + t.content.length, 0) > this.HISTORY_CHAR_LIMIT &&
+      this.conversationHistory.length > 2
+    ) {
+      this.conversationHistory.shift();
+    }
+  }
+
+  private pushHistory(role: 'user' | 'assistant', content: string): void {
+    this.conversationHistory.push({ role, content });
+    // Trim oldest turns until total chars fit the window
+    while (
+      this.conversationHistory.reduce((n, t) => n + t.content.length, 0) > this.HISTORY_CHAR_LIMIT &&
+      this.conversationHistory.length > 2
+    ) {
+      this.conversationHistory.shift();
+    }
   }
 
   // Check if runtime is aborted
@@ -215,11 +257,17 @@ export class AgentRuntime {
       return;
     }
 
-    // Reset tool call history before each new run
+    // Reset tool call history before each new run (conversation history persists)
     this.toolCallHistory = [];
 
+    // Record user message before planning
+    this.pushHistory('user', input);
+
+    // pass a snapshot of history (minus the turn we just added) so planner has prior context
+    const historySnapshot = this.conversationHistory.slice(0, -1);
+
     // transition to planning
-    yield* this.planningPhase(input, ac.signal);
+    yield* this.planningPhase(input, ac.signal, historySnapshot);
 
     if (ac.signal.aborted) {
       yield { type: 'abort', reason: 'Aborted during planning' };
@@ -242,11 +290,13 @@ export class AgentRuntime {
     }
 
     // yield acting phase
-    yield* this.actingPhase(input, ac.signal);
+    yield* this.actingPhase(input, ac.signal, historySnapshot);
 
     // Cast to full union to reset the plan_ready narrowing TypeScript holds after the early-return check above
     const finalState = this.state as AgentState;
     if (finalState.status === 'completed'){
+      // Record assistant answer into sliding history
+      this.pushHistory('assistant', finalState.finalAnswer);
       const completeEvent: AgentEvent = {
         type: 'complete',
         finalResponse: finalState.finalAnswer
@@ -286,19 +336,31 @@ export class AgentRuntime {
  
   }
    
-  // planning phase function 
-  private async * planningPhase(input:string, signal: AbortSignal): AsyncGenerator<AgentEvent>{
+  // planning phase function
+  private async * planningPhase(input:string, signal: AbortSignal, history: ConversationTurn[] = []): AsyncGenerator<AgentEvent>{
     this.state = {status: 'planning', thought: input};
     try{
-      
-      // Check for abort
       signal.throwIfAborted();
-      
-      const planResponse = await this.llmClient!.plan(input);
-      
-      // Check for abort after LLM call
+
+      // Stream plan tokens so the UI can show live thinking text
+      let planResponse = null as import('../types/events.js').PlannerResponse | null;
+      for await (const chunk of this.llmClient!.planStream(input, history)) {
+        signal.throwIfAborted();
+        if (chunk.type === 'token') {
+          const ev: AgentEvent = { type: 'llm_streaming', delta: chunk.content, thinking: chunk.thinking, inThinkBlock: chunk.inThinkBlock };
+          yield ev;
+          this.emit(ev);
+        } else {
+          planResponse = chunk.response;
+        }
+      }
+      if (!planResponse) {
+        this.state = { status: 'aborted', reason: 'Plan stream produced no response', turn: 1 };
+        return;
+      }
+
       signal.throwIfAborted();
-      
+
       const llmEvent: AgentEvent= {
         type: 'llm_response',
         content: JSON.stringify(planResponse),
@@ -366,15 +428,21 @@ export class AgentRuntime {
   }
 
   // Acting Phase
-  private async *actingPhase(userInput: string, signal: AbortSignal): AsyncGenerator<AgentEvent>{
+  private async *actingPhase(userInput: string, signal: AbortSignal, history: ConversationTurn[] = []): AsyncGenerator<AgentEvent>{
     if(this.state.status != 'plan_ready') return;
     const plan = this.state.plan;
     let observations: Observation[] = [];
     let loopCount=0;
     let turn = this.state.turn;
 
+    // Select only the tools relevant to this query — keeps act prompts small
+    const allTools = this.toolRegistry.getAllTools();
+    const relevantNames = classifyIntent(userInput ?? '', allTools.length);
+    const contextTools = relevantNames.length > 0
+      ? allTools.filter(t => relevantNames.includes(t.name))
+      : allTools;
 
-    // acting loop 
+    // acting loop
     while (true){
       // Check for abort at start of each iteration
       signal.throwIfAborted();
@@ -405,7 +473,7 @@ export class AgentRuntime {
         loopCount
       };
 
-      const availableTools = this.toolRegistry.getAllTools();
+      const availableTools = contextTools;
 
       const observationSummaries= observations.map(o=>o.summary);
       const toolCallHistorySummary = this.getToolCallSummary();
@@ -418,22 +486,34 @@ export class AgentRuntime {
         signal.throwIfAborted();
         
         const planText = `Steps:\n${plan.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n\nReasoning: ${plan.reasoning}`;
-        const response = await this.llmClient!.act(
-          planText,
-          observationSummaries,
-          availableTools,
-          userInput,
-          toolCallHistorySummary,
-          forceSynthesis
-        );
-        
-        // Check for abort after LLM call
+
+        // Stream the act tokens live
+        let response = null as import('../types/events.js').PlannerResponse | null;
+        for await (const chunk of this.llmClient!.actStream(
+          planText, observationSummaries, availableTools,
+          userInput, toolCallHistorySummary, forceSynthesis, history
+        )) {
+          signal.throwIfAborted();
+          if (chunk.type === 'token') {
+            const ev: AgentEvent = { type: 'llm_streaming', delta: chunk.content, thinking: chunk.thinking, inThinkBlock: chunk.inThinkBlock };
+            yield ev;
+            this.emit(ev);
+          } else {
+            response = chunk.response;
+          }
+        }
+
+        if (!response) {
+          this.state = { status: 'aborted', reason: 'Act stream produced no response', turn };
+          break;
+        }
+
         signal.throwIfAborted();
-        
+
         const llmEvent: AgentEvent={
           type: 'llm_response',
           content: JSON.stringify(response),
-          parsed: response 
+          parsed: response
         };
         yield llmEvent;
         this.emit(llmEvent);
@@ -535,6 +615,17 @@ export class AgentRuntime {
             };
             yield obsEvent;
             this.emit(obsEvent);
+
+            // When edit_file fails, wipe that path from read_file history so the model
+            // can re-read and get the exact text — otherwise duplicate detection traps it
+            if (!observation.success && toolCall.name === 'edit_file') {
+              const p = toolCall.args.path as string | undefined;
+              if (p) {
+                this.toolCallHistory = this.toolCallHistory.filter(
+                  c => !(c.name === 'read_file' && c.args.path === p)
+                );
+              }
+            }
           }
 
           loopCount++;
@@ -649,8 +740,11 @@ export class AgentRuntime {
       case 'read_file':
         if (result.success && result.output) {
           const output = result.output;
-          const lines = typeof output.content === 'string' ? output.content.split('\n').length : 0;
-          summary = `Read ${input.path}: ${lines} lines${result.metadata?.truncated ? ' (truncated)' : ''}`;
+          const content = typeof output.content === 'string' ? output.content : '';
+          const lines = content.split('\n').length;
+          const wasTruncated = result.metadata?.truncated || content.length > 2500;
+          const preview = content.slice(0, 2500);
+          summary = `Read ${input.path}: ${lines} lines${wasTruncated ? ' (truncated)' : ''}\n${preview}${wasTruncated ? '\n...' : ''}`;
         } else {
           summary = `Failed to read ${input.path}: ${result.error}`;
         }
@@ -747,7 +841,12 @@ export class AgentRuntime {
         if (result.success && result.output) {
           const { diff, path: diffPath } = result.output as { diff: string; path: string };
           const { additions = 0, deletions = 0 } = result.metadata ?? {};
-          const preview = diff.split('\n').filter((l: string) => l.startsWith('+') || l.startsWith('-')).slice(0, 6).join('\n');
+          // Include the full patch header + all changed lines (up to 40 lines displayed)
+          const diffLines = diff.split('\n');
+          const preview = diffLines
+            .filter((l: string) => l.startsWith('@@') || l.startsWith('+') || l.startsWith('-') || l.startsWith(' '))
+            .slice(0, 80)
+            .join('\n');
           summary = `Git diff (${diffPath}): +${additions} -${deletions} lines.\n${preview}`;
         } else {
           summary = `git_diff failed: ${result.error}`;

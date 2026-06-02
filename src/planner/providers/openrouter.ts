@@ -18,6 +18,28 @@ export class OpenRouterProvider implements LLMProvider{
     this.model = model || 'arcee-ai/trinity-large-preview:free';
   }
 
+  // Context window sizes for common OpenRouter models
+  private static readonly CONTEXT_WINDOWS: Record<string, number> = {
+    'qwen/qwen3.5': 32768,
+    'qwen/qwen-2.5-72b-instruct': 131072,
+    'meta-llama/llama-3.1-8b-instruct': 131072,
+    'meta-llama/llama-3.2-3b-instruct': 131072,
+    'anthropic/claude-3-5-sonnet': 200000,
+    'anthropic/claude-3-haiku': 200000,
+    'google/gemini-flash-1.5': 1000000,
+    'mistralai/mistral-7b-instruct': 32768,
+    'arcee-ai/trinity-large-preview': 32768,
+  };
+
+  async getContextWindow(): Promise<number> {
+    // Match model name prefix against known sizes
+    const model = this.model.replace(/:free$/, '');
+    for (const [key, size] of Object.entries(OpenRouterProvider.CONTEXT_WINDOWS)) {
+      if (model.startsWith(key)) return size;
+    }
+    return 32768; // conservative default
+  }
+
   async isAvailable(): Promise<boolean>{
     try{
       const response = await fetch(`${this.baseURL}/models`,{

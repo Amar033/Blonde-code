@@ -1,31 +1,77 @@
-# Project Title
+# Blonde-code
 
-## Introduction
+A proper AI developer tool taking inspiration from Claude Code and opencode, built from scratch by myself. [01-02-2026]
 
-This is a brief introduction to the project.
+## Why?
 
-## Features
+I am trying to build this project from scratch — the agent runtime and almost all components built by me — so that I can understand first-hand how an agentic system works.
 
-- Feature 1
-- Feature 2
-- Feature 3
+I did a simpler AI dev tool in the past with the same name (Blonde), which also had an offline mode since some models could run via llama.cpp on CPU. That version was dependency hell, developed in Python, and most important portions of it were vibe-coded — which caused errors in the long run.
 
-## Installation
+Blonde v2 was proper at first but the TUI failed (again, due to vibe coding that part). v2 was downloadable and executable and looked better, but had inherent flaws that couldn't be fixed because of misconceptions I had while building it.
 
-bash
-git clone https://github.com/example/repo.git
-cd repo
+So from scratch: a proper plan, step by step, build this system and apply it across developer use cases. I also plan to use other methods for running local models and get at least half the capability of online API models.
+
+---
+
+## Stack & Architecture
+
+Language: **TypeScript** (learning as I go — why not? it will be fun!)
+
+All processes in the agent runtime are event-based. TypeScript felt right for the tooling and format guarantees that an agent runtime needs.
+
+Runtime target: **Node.js** (with Bun as a potential future target)
+
+```
+Blonde/
+  src/
+    planner/     — LLM layer (provider-agnostic service layer)
+    runtime/     — Agent runtime (plan → act → observe loop)
+    tools/       — Tool implementations
+    types/       — TypeScript definitions
+    ui/          — TUI (Ink/React)
+  main.ts        — Entry point
+```
+
+The LLM layer is built against a custom service interface rather than vendor SDKs — raw HTTP to the provider APIs. This makes it easier to swap providers and support local models (Ollama) alongside remote ones (OpenRouter).
+
+---
+
+## Current State
+
+- Plan/Act/Observe agent loop implemented
+- Streaming planning and acting phases with live `<think>` block display
+- OpenRouter (remote) + Ollama (local) providers
+- Ollama auto-discovers model directories including USB drives
+- Intent-based tool filtering — selects only the relevant tool subset per query to keep prompts small and the model fast
+- 12 built-in tools: `read_file`, `write_file`, `edit_file`, `list_files`, `glob`, `grep`, `file_tree`, `git_status`, `git_diff`, `bash`, `web_search`, `web_fetch`
+- Session persistence with conversation history
+- TUI built with Ink — coloured diff view, live thinking stream, tool approval flow
+
+---
+
+## Running
+
+```bash
+cp .env.example .env   # set LLM_PROVIDER, LLM_MODEL, OPENROUTER_API_KEY
 npm install
+npm run agent
+```
 
+For Ollama (local):
+```bash
+LLM_PROVIDER=ollama LLM_MODEL=qwen3.5:latest npm run agent
+```
 
-## Usage
+---
 
-See the documentation for usage instructions.
+## Roadmap
 
-## Contributing
+- [ ] Streaming token counts and context window display improvements
+- [ ] MCP (Model Context Protocol) tool support
+- [ ] Local model hosting layer (alternative to llama.cpp dependency hell)
+- [ ] Multi-agent support
 
-Contributions are welcome! Please read our contributing guidelines.
+---
 
-## License
-
-MIT License
+*Building this to understand it — not to ship fast.*
