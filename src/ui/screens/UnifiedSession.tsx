@@ -11,6 +11,7 @@ import { FilesPanel, type FileChange } from '../components/FilesPanel.js';
 import { ToolsPanel, type ToolEntry } from '../components/ToolsPanel.js';
 import { ContextPanel } from '../components/ContextPanel.js';
 import { CommandPalette } from '../components/CommandPalette.js';
+import { AppHeader } from '../components/AppHeader.js';
 import { mockEventStream } from '../mock/eventStream.js';
 import type { Plan, Observation } from '../../types/agent.js';
 import os from 'os';
@@ -682,22 +683,12 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
   return (
     <Box flexDirection="column" height={termRows}>
 
-      {/* ── Header — always visible, 3 rows ───────────────────── */}
-      <Box height={3} borderStyle="round" borderColor={theme.border.normal} paddingX={2}>
-        <Text bold color={theme.brand}>◆ Blonde</Text>
-        <Text color={theme.text.dim}> ╱ </Text>
-        <Text color={theme.text.secondary}>{currentModel}</Text>
-        {tokenUsage > 0 && (
-          <>
-            <Text color={theme.text.dim}> ╱ </Text>
-            <Text color={theme.text.link}>↑{tokenUsage.toLocaleString()} tokens</Text>
-          </>
-        )}
-        <Text color={theme.text.dim}> ╱ </Text>
-        <Text color={theme.text.dim}>{mm}:{ss}</Text>
-        <Text color={theme.text.dim}> ╱ </Text>
-        <Text color={theme.text.dim}>{CWD}</Text>
-      </Box>
+      {/* ── Header — shared component, matches welcome screen ── */}
+      <AppHeader
+        model={currentModel}
+        tokenUsage={tokenUsage}
+        timeDisplay={`${mm}:${ss}`}
+      />
 
       {/* ── Content row — fixed height, sidebar always visible ── */}
       <Box flexDirection="row" gap={1} height={convH}>

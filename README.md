@@ -74,6 +74,17 @@ For Ollama (local):
 LLM_PROVIDER=ollama LLM_MODEL=qwen3.5:latest npm run agent
 ```
 
+### Customising the welcome screen banner
+
+Place any PNG or JPG at `assets/blonde-banner.png` — it will render automatically on the welcome screen. Supported in all terminals (pixel-perfect in Kitty/iTerm2/WezTerm, colored blocks everywhere else).
+
+To use a different file without touching the repo:
+```
+BLONDE_BANNER=~/Pictures/my-logo.png
+```
+
+Add it to your `.env`. Leave it unset to fall back to the default wordmark.
+
 ---
 
 ## Roadmap

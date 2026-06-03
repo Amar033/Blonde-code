@@ -2,12 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { Box, Text } from 'ink';
 import TextInput from 'ink-text-input';
 import { execSync } from 'child_process';
-import { theme } from '../theme.js';
 import { SessionManager, type Session } from '../../sessions/session-manager.js';
-import os from 'os';
+import { AppHeader } from '../components/AppHeader.js';
+import { BrandMark } from '../components/BrandMark.js';
 
 const PROVIDER = process.env.LLM_PROVIDER || 'ollama';
-const CWD      = process.cwd().replace(os.homedir(), '~');
 
 function getGitBranch(): string | null {
   try {
@@ -85,82 +84,77 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onShowSes
   };
 
   return (
-    <Box flexDirection="column" paddingX={1}>
+    <Box flexDirection="column">
 
-      {/* ── Brand header ───────────────────────────────────── */}
-      <Box flexDirection="column" paddingTop={1} paddingBottom={1}>
-        <Box gap={2}>
-          <Text bold color={theme.brand}>◆ Blonde</Text>
-          <Text color={theme.border.normal}>│</Text>
-          <Text color={theme.text.dim}>{PROVIDER}</Text>
-          <Text color={theme.text.dim}>·</Text>
-          <Text color={theme.text.secondary}>{model}</Text>
-        </Box>
-        <Box gap={2} marginTop={0}>
-          <Text color={theme.text.dim}>{CWD}</Text>
-          {gitBranch && (
-            <>
-              <Text color={theme.text.dim}>on</Text>
-              <Text color={theme.status.warning}>{gitBranch}</Text>
-            </>
-          )}
-        </Box>
-      </Box>
+      {/* ── Shared header — same as session screen ───────────── */}
+      <AppHeader model={model} provider={PROVIDER} branch={gitBranch} />
 
-      <Box><Text color={theme.border.dim}>{'─'.repeat(64)}</Text></Box>
+      {/* ── Body: brand left | content right ─────────────────── */}
+      <Box
+        flexDirection="row"
+        borderStyle="single"
+        borderColor="#2a2a2a"
+        paddingX={2}
+        paddingY={1}
+        gap={4}
+      >
 
-      {/* ── Recent sessions / empty state ──────────────────── */}
-      <Box flexDirection="column" paddingTop={1} paddingBottom={1}>
-        {recent.length === 0 ? (
-          <Box flexDirection="column" paddingY={1}>
-            <Text bold color={theme.text.primary}>No sessions yet</Text>
-            <Text color={theme.text.dim}>Type a task below to get started.</Text>
-          </Box>
-        ) : (
+        {/* Left: brand mark (image or wordmark) */}
+        <BrandMark width={22} />
+
+        {/* Right: getting started + recent sessions */}
+        <Box flexDirection="column" flexGrow={1} gap={2}>
+
           <Box flexDirection="column">
-            <Text color={theme.text.dim}>Recent sessions</Text>
-            <Box marginTop={1} flexDirection="column">
-              {recent.map((s, i) => (
-                <Box key={s.id} gap={2}>
-                  <Text color={theme.text.dim}>{i + 1}</Text>
-                  <Text color={theme.text.link}>{s.name.slice(0, 50)}</Text>
-                  <Text color={theme.text.dim}>{fmtDate(s.updatedAt)}</Text>
-                  <Text color={theme.text.dim}>{s.model}</Text>
-                </Box>
-              ))}
-            </Box>
+            <Text bold color="#e8e8e8">Welcome back</Text>
+            <Text color="#aaaaaa">Ask me to read, search, or edit your codebase.</Text>
+            <Text color="#555555">Be specific — like you would with a teammate.</Text>
           </Box>
-        )}
+
+          <Box flexDirection="column">
+            <Text bold color="#aaaaaa">Recent sessions</Text>
+            {recent.length === 0
+              ? <Text color="#555555">no sessions yet</Text>
+              : recent.map((s, i) => (
+                <Box key={s.id} gap={2}>
+                  <Text color="#4a9eff">{s.name.slice(0, 44)}</Text>
+                  <Text color="#555555">{fmtDate(s.updatedAt)}</Text>
+                  <Text color="#555555">{s.model}</Text>
+                </Box>
+              ))
+            }
+          </Box>
+
+        </Box>
       </Box>
 
-      <Box><Text color={theme.border.dim}>{'─'.repeat(64)}</Text></Box>
+      {/* ── Status message ───────────────────────────────────── */}
+      {statusMsg && (
+        <Box marginTop={1} paddingX={1} gap={1}>
+          <Text color="#4a9eff">!</Text>
+          <Text color="#aaaaaa">{statusMsg}</Text>
+        </Box>
+      )}
 
-      {/* ── Input ──────────────────────────────────────────── */}
-      <Box marginTop={1} gap={1}>
-        <Text bold color={theme.role.user}>❯</Text>
+      {/* ── Hints ────────────────────────────────────────────── */}
+      <Box marginTop={1} paddingX={1} gap={2}>
+        <Text color="#555555">/sessions</Text>
+        <Text color="#555555">·</Text>
+        <Text color="#555555">/model</Text>
+        <Text color="#555555">·</Text>
+        <Text color="#555555">Ctrl+K for commands</Text>
+      </Box>
+
+      {/* ── Input ────────────────────────────────────────────── */}
+      <Box marginTop={0} borderStyle="round" borderColor="#4a9eff" paddingX={2}>
+        <Text color="#a78bfa">{'→ '}</Text>
         <TextInput
           value={task}
           onChange={setTask}
           onSubmit={handleSubmit}
-          placeholder="What would you like to build?"
+          placeholder="What can I help you build today?"
         />
       </Box>
-
-      {/* ── Hints / status ─────────────────────────────────── */}
-      {statusMsg ? (
-        <Box marginTop={1} gap={1} paddingX={2}>
-          <Text color={theme.status.info}>!</Text>
-          <Text color={theme.text.secondary}>{statusMsg}</Text>
-        </Box>
-      ) : (
-        <Box marginTop={1} gap={2} paddingX={2}>
-          <Text color={theme.text.dim}>/sessions</Text>
-          <Text color={theme.text.dim}>·</Text>
-          <Text color={theme.text.dim}>/model</Text>
-          <Text color={theme.text.dim}>·</Text>
-          <Text color={theme.text.dim}>Ctrl+K</Text>
-        </Box>
-      )}
 
     </Box>
   );
