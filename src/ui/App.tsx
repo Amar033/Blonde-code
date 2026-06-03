@@ -7,9 +7,15 @@ import type { Session } from '../sessions/session-manager.js';
 
 type Screen = 'welcome' | 'session' | 'sessions-list';
 
-export const App: React.FC = () => {
-  const [screen,      setScreen]      = useState<Screen>('welcome');
-  const [initialTask, setInitialTask] = useState<string | undefined>();
+interface AppProps {
+  mockMode?: boolean;
+}
+
+export const App: React.FC<AppProps> = ({ mockMode }) => {
+  const [screen,        setScreen]        = useState<Screen>(mockMode ? 'session' : 'welcome');
+  const [initialTask,   setInitialTask]   = useState<string | undefined>(
+    mockMode ? 'Build a FastAPI backend with SQLite database' : undefined
+  );
   const [resumeSession, setResumeSession] = useState<Session | undefined>();
 
   const handleStart = (task: string) => {
@@ -17,8 +23,6 @@ export const App: React.FC = () => {
     setResumeSession(undefined);
     setScreen('session');
   };
-
-  const handleShowSessions = () => setScreen('sessions-list');
 
   const handleResumeSession = (session: Session) => {
     setResumeSession(session);
@@ -35,22 +39,18 @@ export const App: React.FC = () => {
   return (
     <Box>
       {screen === 'welcome' && (
-        <WelcomeScreen onStart={handleStart} onShowSessions={handleShowSessions} />
+        <WelcomeScreen onStart={handleStart} onShowSessions={() => setScreen('sessions-list')} />
       )}
-
       {screen === 'sessions-list' && (
-        <SessionsScreen
-          onBack={() => setScreen('welcome')}
-          onResume={handleResumeSession}
-        />
+        <SessionsScreen onBack={() => setScreen('welcome')} onResume={handleResumeSession} />
       )}
-
       {screen === 'session' && (
         <UnifiedSession
           initialTask={initialTask}
           resumeSession={resumeSession}
+          mockMode={mockMode}
           onComplete={handleComplete}
-          onShowSessions={handleShowSessions}
+          onShowSessions={() => setScreen('sessions-list')}
         />
       )}
     </Box>

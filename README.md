@@ -46,6 +46,17 @@ The LLM layer is built against a custom service interface rather than vendor SDK
 - Intent-based tool filtering — selects only the relevant tool subset per query to keep prompts small and the model fast
 - 12 built-in tools: `read_file`, `write_file`, `edit_file`, `list_files`, `glob`, `grep`, `file_tree`, `git_status`, `git_diff`, `bash`, `web_search`, `web_fetch`
 - Session persistence with conversation history
+
+## Future Plans
+
+- [ ] Add more tools
+- [ ] Improve performance
+- [ ] Add documentation
+
+## Future Plans
+- Continue building out the agent runtime
+- Add more tools and capabilities
+- Improve the TUI experience
 - TUI built with Ink — coloured diff view, live thinking stream, tool approval flow
 
 ---

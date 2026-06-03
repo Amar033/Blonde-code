@@ -1,17 +1,33 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Box, Text } from 'ink';
 import TextInput from 'ink-text-input';
-import { colors } from '../design-system.js';
+import { execSync } from 'child_process';
+import { theme } from '../theme.js';
+import { SessionManager, type Session } from '../../sessions/session-manager.js';
 import os from 'os';
 
 const PROVIDER = process.env.LLM_PROVIDER || 'ollama';
 const CWD      = process.cwd().replace(os.homedir(), '~');
 
-const EXAMPLES = [
-  'list all TypeScript files in src',
-  'find every TODO comment',
-  'read package.json and summarize',
-];
+function getGitBranch(): string | null {
+  try {
+    return execSync('git rev-parse --abbrev-ref HEAD', {
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).toString().trim();
+  } catch {
+    return null;
+  }
+}
+
+function fmtDate(iso: string): string {
+  const d    = new Date(iso);
+  const diff = Date.now() - d.getTime();
+  const days = Math.floor(diff / 86400000);
+  if (days === 0) return 'today';
+  if (days === 1) return 'yesterday';
+  if (days < 7)  return `${days}d ago`;
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
 
 interface WelcomeScreenProps {
   onStart: (task: string) => void;
@@ -22,6 +38,16 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onShowSes
   const [task,      setTask]      = useState('');
   const [statusMsg, setStatusMsg] = useState('');
   const [model,     setModel]     = useState(process.env.LLM_MODEL || 'qwen3.5:latest');
+  const [recent,    setRecent]    = useState<Session[]>([]);
+  const [gitBranch]               = useState<string | null>(getGitBranch);
+
+  useEffect(() => {
+    const mgr = new SessionManager();
+    mgr.init()
+      .then(() => mgr.loadAll())
+      .then(sessions => setRecent(sessions.slice(0, 5)))
+      .catch(() => {});
+  }, []);
 
   const handleSubmit = () => {
     const v = task.trim();
@@ -34,22 +60,23 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onShowSes
       import('../../planner/providers/ollama.js').then(async ({ OllamaProvider, findOllamaModelsDirs }: any) => {
         const p = new OllamaProvider(model, process.env.OLLAMA_BASE_URL || 'http://localhost:11434');
         const [models, dirs] = await Promise.all([p.listModels(), findOllamaModelsDirs()]);
-        const modelsDir = dirs[0]?.path ?? process.env.OLLAMA_MODELS ?? '~/.ollama/models';
-        const parts = [`Current: ${model}`];
-        if (models.length > 0) parts.push(`Available: ${models.join(', ')}`);
-        parts.push(`Models dir: ${modelsDir}`);
-        parts.push(`/model <name> to switch`);
-        setStatusMsg(parts.join(' | '));
-      }).catch(() => setStatusMsg(`Current model: ${model} (via ${PROVIDER})`));
+        const modelsDir = dirs[0]?.path ?? '~/.ollama/models';
+        setStatusMsg([
+          `current: ${model}`,
+          models.length ? `available: ${models.join(', ')}` : 'no models found',
+          `dir: ${modelsDir}`,
+          '/model <name> to switch',
+        ].join('  ·  '));
+      }).catch(() => setStatusMsg(`current: ${model} (${PROVIDER})`));
       return;
     }
 
     if (v.startsWith('/model ')) {
-      const newModel = v.slice('/model '.length).trim();
-      if (newModel) {
-        process.env.LLM_MODEL = newModel;
-        setModel(newModel);
-        setStatusMsg(`Model set to ${newModel} — will apply to the next session`);
+      const m = v.slice(7).trim();
+      if (m) {
+        process.env.LLM_MODEL = m;
+        setModel(m);
+        setStatusMsg(`model set to ${m} — applies to next session`);
       }
       return;
     }
@@ -58,102 +85,82 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onShowSes
   };
 
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" paddingX={1}>
 
-      {/* ── Info panel ─────────────────────────────────────────── */}
-      <Box
-        borderStyle="single"
-        borderColor={colors.border}
-        flexDirection="column"
-        paddingX={2}
-        paddingY={1}
-      >
-        {/* Title bar */}
-        <Box marginBottom={1} gap={1}>
-          <Text bold color={colors.brand}>Blonde</Text>
-          <Text dimColor>v0.1.0</Text>
-          <Text dimColor>─</Text>
-          <Text dimColor>{PROVIDER} / {model}</Text>
-          <Text dimColor>─</Text>
-          <Text dimColor>{CWD}</Text>
+      {/* ── Brand header ───────────────────────────────────── */}
+      <Box flexDirection="column" paddingTop={1} paddingBottom={1}>
+        <Box gap={2}>
+          <Text bold color={theme.brand}>◆ Blonde</Text>
+          <Text color={theme.border.normal}>│</Text>
+          <Text color={theme.text.dim}>{PROVIDER}</Text>
+          <Text color={theme.text.dim}>·</Text>
+          <Text color={theme.text.secondary}>{model}</Text>
         </Box>
-
-        {/* Divider */}
-        <Box marginBottom={1}>
-          <Text dimColor>{'─'.repeat(58)}</Text>
+        <Box gap={2} marginTop={0}>
+          <Text color={theme.text.dim}>{CWD}</Text>
+          {gitBranch && (
+            <>
+              <Text color={theme.text.dim}>on</Text>
+              <Text color={theme.status.warning}>{gitBranch}</Text>
+            </>
+          )}
         </Box>
+      </Box>
 
-        {/* Two-column body */}
-        <Box flexDirection="row" gap={4}>
+      <Box><Text color={theme.border.dim}>{'─'.repeat(64)}</Text></Box>
 
-          {/* Left: identity */}
-          <Box flexDirection="column" width={22}>
-            <Text bold color={colors.text}>Welcome back!</Text>
+      {/* ── Recent sessions / empty state ──────────────────── */}
+      <Box flexDirection="column" paddingTop={1} paddingBottom={1}>
+        {recent.length === 0 ? (
+          <Box flexDirection="column" paddingY={1}>
+            <Text bold color={theme.text.primary}>No sessions yet</Text>
+            <Text color={theme.text.dim}>Type a task below to get started.</Text>
+          </Box>
+        ) : (
+          <Box flexDirection="column">
+            <Text color={theme.text.dim}>Recent sessions</Text>
             <Box marginTop={1} flexDirection="column">
-              <Text color={colors.brand}>{'  ╔══╗  '}</Text>
-              <Text color={colors.brand}>{'  ║◈◈║  '}</Text>
-              <Text color={colors.brand}>{'  ╚══╝  '}</Text>
-              <Text color={colors.brand}>{'  /||\\  '}</Text>
-            </Box>
-            <Box marginTop={1}>
-              <Text dimColor>AI Coding Agent</Text>
+              {recent.map((s, i) => (
+                <Box key={s.id} gap={2}>
+                  <Text color={theme.text.dim}>{i + 1}</Text>
+                  <Text color={theme.text.link}>{s.name.slice(0, 50)}</Text>
+                  <Text color={theme.text.dim}>{fmtDate(s.updatedAt)}</Text>
+                  <Text color={theme.text.dim}>{s.model}</Text>
+                </Box>
+              ))}
             </Box>
           </Box>
-
-          {/* Right: tips + activity */}
-          <Box flexDirection="column" flexGrow={1} gap={2}>
-
-            <Box flexDirection="column" gap={0}>
-              <Text bold color={colors.warning}>Getting started</Text>
-              <Text dimColor>Ask me to read, search, or edit your codebase.</Text>
-              <Text dimColor>Be specific — like you would with a teammate.</Text>
-            </Box>
-
-            <Box flexDirection="column" gap={0}>
-              <Text bold color={colors.textMuted}>Recent activity</Text>
-              <Text dimColor>No recent activity</Text>
-            </Box>
-
-          </Box>
-        </Box>
+        )}
       </Box>
 
-      {/* ── Command response ───────────────────────────────────── */}
-      {statusMsg && (
-        <Box marginTop={1} paddingX={1}>
-          <Text color={colors.warning}>{'! '}</Text>
-          <Text dimColor>{statusMsg}</Text>
-        </Box>
-      )}
+      <Box><Text color={theme.border.dim}>{'─'.repeat(64)}</Text></Box>
 
-      {/* ── Hint ───────────────────────────────────────────────── */}
-      <Box marginTop={1} paddingX={1}>
-        <Text dimColor>/sessions · previous chats   /model · list/switch model</Text>
-      </Box>
-
-      {/* ── Input ──────────────────────────────────────────────── */}
-      <Box
-        marginTop={0}
-        borderStyle="round"
-        borderColor={colors.borderActive}
-        paddingX={2}
-      >
-        <Text color={colors.brand}>{'→ '}</Text>
+      {/* ── Input ──────────────────────────────────────────── */}
+      <Box marginTop={1} gap={1}>
+        <Text bold color={theme.role.user}>❯</Text>
         <TextInput
           value={task}
           onChange={setTask}
           onSubmit={handleSubmit}
-          placeholder="What can I help you build today?"
+          placeholder="What would you like to build?"
         />
       </Box>
 
-      {/* ── Example prompts ────────────────────────────────────── */}
-      <Box marginTop={1} paddingX={1} gap={2}>
-        <Text dimColor>Try:</Text>
-        {EXAMPLES.map((ex, i) => (
-          <Text key={i} color={colors.textDim}>{ex}</Text>
-        ))}
-      </Box>
+      {/* ── Hints / status ─────────────────────────────────── */}
+      {statusMsg ? (
+        <Box marginTop={1} gap={1} paddingX={2}>
+          <Text color={theme.status.info}>!</Text>
+          <Text color={theme.text.secondary}>{statusMsg}</Text>
+        </Box>
+      ) : (
+        <Box marginTop={1} gap={2} paddingX={2}>
+          <Text color={theme.text.dim}>/sessions</Text>
+          <Text color={theme.text.dim}>·</Text>
+          <Text color={theme.text.dim}>/model</Text>
+          <Text color={theme.text.dim}>·</Text>
+          <Text color={theme.text.dim}>Ctrl+K</Text>
+        </Box>
+      )}
 
     </Box>
   );

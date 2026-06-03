@@ -616,9 +616,9 @@ export class AgentRuntime {
             yield obsEvent;
             this.emit(obsEvent);
 
-            // When edit_file fails, wipe that path from read_file history so the model
-            // can re-read and get the exact text — otherwise duplicate detection traps it
-            if (!observation.success && toolCall.name === 'edit_file') {
+            // After any edit_file (success or failure), allow one verification read
+            // by clearing that path from the duplicate-detection history.
+            if (toolCall.name === 'edit_file') {
               const p = toolCall.args.path as string | undefined;
               if (p) {
                 this.toolCallHistory = this.toolCallHistory.filter(
