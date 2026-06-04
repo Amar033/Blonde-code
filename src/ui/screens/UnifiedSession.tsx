@@ -601,6 +601,10 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
     // Ctrl+K — command palette toggle (only when not in palette)
     if (key.ctrl && char === 'k' && !showPalette) { setShowPalette(true); return; }
 
+    // Page Up / Page Down — scroll conversation from ANY focus, no Tab required
+    if (key.pageUp)   { setScrollUp(s => s + 10); return; }
+    if (key.pageDown) { setScrollUp(s => Math.max(0, s - 10)); return; }
+
     // Tab — cycle panel focus
     if (key.tab) {
       const idx = FOCUS_CYCLE.indexOf(focus);
@@ -611,7 +615,7 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
       return;
     }
 
-    // Conversation panel navigation
+    // Conversation panel navigation (vim-style, only when conv is focused via Tab)
     if (focus === 'conv') {
       if (key.upArrow || char === 'k')   { setScrollUp(s => s + 3); return; }
       if (key.downArrow || char === 'j') { setScrollUp(s => Math.max(0, s - 3)); return; }
@@ -668,12 +672,12 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
     : 'Ask anything… (Ctrl+K for commands)';
 
   const footerHint = focus === 'conv'
-    ? '↑↓/jk · scroll   g · top   G · bottom   Tab · panels'
+    ? '↑↓/jk · scroll   PgUp/PgDn · scroll   g · top   G · bottom   Tab · panels'
     : focus !== 'input'
-    ? '↑↓ · scroll   Tab · panels'
+    ? 'PgUp/PgDn · scroll   Tab · panels'
     : isRunning
-    ? 'stop · cancel   Ctrl+C · interrupt   Ctrl+K · cmds'
-    : 'Enter · submit   ↑ · history   Tab · panels   Ctrl+K · cmds';
+    ? 'PgUp/PgDn · scroll   stop · cancel   Ctrl+C · interrupt   Ctrl+K · cmds'
+    : 'Enter · submit   PgUp/PgDn · scroll   ↑ · history   Tab · panels   Ctrl+K · cmds';
 
   const convBorder  = focus === 'conv' ? theme.border.active : theme.border.normal;
   const scrollPadH  = scrollUp > 0 ? Math.min(scrollUp, convH - 6) : 0;

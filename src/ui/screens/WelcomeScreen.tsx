@@ -4,7 +4,7 @@ import TextInput from 'ink-text-input';
 import { execSync } from 'child_process';
 import { SessionManager, type Session } from '../../sessions/session-manager.js';
 import { AppHeader } from '../components/AppHeader.js';
-import { BrandMark } from '../components/BrandMark.js';
+import { BrandMark, LOGO_OPTIONS } from '../components/BrandMark.js';
 
 const PROVIDER = process.env.LLM_PROVIDER || 'ollama';
 
@@ -39,6 +39,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onShowSes
   const [model,     setModel]     = useState(process.env.LLM_MODEL || 'qwen3.5:latest');
   const [recent,    setRecent]    = useState<Session[]>([]);
   const [gitBranch]               = useState<string | null>(getGitBranch);
+  const [logoIndex, setLogoIndex] = useState<number | undefined>(undefined);
 
   useEffect(() => {
     const mgr = new SessionManager();
@@ -80,6 +81,24 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onShowSes
       return;
     }
 
+    if (v === '/logo' || v === '/logos') {
+      const list = LOGO_OPTIONS.map(o => `/logo ${o.index} — ${o.label}`).join('  ·  ');
+      setStatusMsg(`logos: ${list}`);
+      return;
+    }
+
+    if (v.startsWith('/logo ')) {
+      const n = parseInt(v.slice(6).trim(), 10);
+      const opt = LOGO_OPTIONS.find(o => o.index === n);
+      if (opt) {
+        setLogoIndex(n);
+        setStatusMsg(`logo set to ${n} (${opt.label})`);
+      } else {
+        setStatusMsg(`unknown logo — try /logo 1, /logo 2, or /logo 3`);
+      }
+      return;
+    }
+
     onStart(v);
   };
 
@@ -100,7 +119,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onShowSes
       >
 
         {/* Left: brand mark (image or wordmark) */}
-        <BrandMark width={22} />
+        <BrandMark width={22} logoIndex={logoIndex} />
 
         {/* Right: getting started + recent sessions */}
         <Box flexDirection="column" flexGrow={1} gap={2}>
@@ -141,6 +160,8 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onShowSes
         <Text color="#555555">/sessions</Text>
         <Text color="#555555">·</Text>
         <Text color="#555555">/model</Text>
+        <Text color="#555555">·</Text>
+        <Text color="#555555">/logo [1-3]</Text>
         <Text color="#555555">·</Text>
         <Text color="#555555">Ctrl+K for commands</Text>
       </Box>
