@@ -1,4 +1,4 @@
-import type {Plan, Observation} from './agent.ts'
+import type {Plan, Observation} from './agent.js'
 
 
 // Events represent things that happen to the agent 
@@ -8,7 +8,7 @@ export type AgentEvent =
   | {type: 'user_input'; input: string}
   | {type: 'plan_generated'; plan: Plan}
   | {type: 'llm_response'; content: string; parsed: PlannerResponse; thinking?: string}
-  | {type: 'llm_streaming'; delta: string; thinking?: string}
+  | {type: 'llm_streaming'; delta: string; thinking?: string; inThinkBlock?: boolean}
   | {type: 'tool_validated'; valid: boolean; reason?: string}
   | {type: 'tool_result'; toolName: string; result: unknown}
   | {type: 'tool_error'; toolName: string; error: string}
@@ -20,9 +20,9 @@ export type AgentEvent =
 
 // PlannerResponse is what the llm can respond to the agent runtime, in this we define what all the llm would respond to the runtime.
 
-export type PlannerResponse = 
-  | {type: 'plan'; steps: string[]; reasoning: string }
-  | {type: 'tool_call'; tool: string; args: Record<string, unknown>; requiresApproval: boolean}
+export type PlannerResponse =
+  | {type: 'plan'; steps: string[]; reasoning: string; estimatedToolCalls?: number}
+  | {type: 'tool_call'; tool: string; args: Record<string, unknown>; requiresApproval: boolean; reasoning?: string}
   | {type: 'answer'; content: string}
   | {type: 'need_info'; question: string};
 

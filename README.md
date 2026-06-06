@@ -1,39 +1,99 @@
 # Blonde-code
-A Proper AI developer tool taking inspiration from claude code and opencode made by myself without any ai tools to support me in this.
-[01-02-2026]
 
-### Why?
-I am trying to build this project from scratch with the agent runtime and the almost all the components build by me so that i can understand first hand how an agentc system works. I did a simple ai dev tool in the past with the same name title [Blonde](https://github.com/cerekinorg/BlondE-cli-v1.0.0) , which also had a offline mode since some models could be ran using the cpu via llama.cpp but this was dependency hell, though that was developed in python and most important portiobns of it were vibecoded and caused errors in long run, hence i wanted to build a proper agent in v2, which was proper at first again but the TUI failed me (again the issue being vibe coding at that part), but v2 of blonde was downloadable and executable and it looked better, but had inherent flaws that couldnt be fixed because of misconceptions that i had while building it. 
+A proper AI developer tool taking inspiration from Claude Code and opencode, built from scratch by myself. [01-02-2026]
 
-So, From scratch i plan to have a proper plan and step by step create this project so that i can build this system and apply it as well in almost all developer use case, and i also plan to use some other methods for the local modal running in system and having atleast half the capabilty of the online models that we can call via apis.
+## Why?
 
-Thank you for reading till now, from today i will start coding for this project!
+I am trying to build this project from scratch — the agent runtime and almost all components built by me — so that I can understand first-hand how an agentic system works.
 
+I did a simpler AI dev tool in the past with the same name (Blonde), which also had an offline mode since some models could run via llama.cpp on CPU. That version was dependency hell, developed in Python, and most important portions of it were vibe-coded — which caused errors in the long run.
 
-Currently I iterated on plan and chose typescript as the base language even though I am not good at this.
-Why not?, It will be fun. (I have no idea)
-So all the process in the agent runtime is based on events  and also a lot of tooling and format issues may arise so, I THINK, typescript is a good choice? Correct me if i am wrong.
+Blonde v2 was proper at first but the TUI failed (again, due to vibe coding that part). v2 was downloadable and executable and looked better, but had inherent flaws that couldn't be fixed because of misconceptions I had while building it.
 
-So currently planning the project and i have decided on the setup to be done on node, and MAYBE try bun in the future (I am currently just shouting buzzwords at this point)
+So from scratch: a proper plan, step by step, build this system and apply it across developer use cases. I also plan to use other methods for running local models and get at least half the capability of online API models.
 
-The llm layer of the project will be built using already existing ai sdks but i plan to setup my own service layer for the llms so that i can switch between multiple providers and even with local models.
+---
 
-The project is setup as:
+## Stack & Architecture
 
-Blonde
-|-scr 
-  |-planner (llm portion)
-  |-runtime (agent runtime)
-  |-tools (mcp tools or any tools that the application may require)
-  |-types (all ts definitions)
-  |-ui (TUI portion)
-|-main.ts (entry point)
+Language: **TypeScript** (learning as I go — why not? it will be fun!)
 
-I am unsure if i should start with the design of the tui for better understanding of the input and output or to be just focused on the backend for now.
+All processes in the agent runtime are event-based. TypeScript felt right for the tooling and format guarantees that an agent runtime needs.
 
+Runtime target: **Node.js** (with Bun as a potential future target)
 
-#### Date: Feb 8th 2026
-Currently we have plan mode integrated into the application and also openrouter provider is added, and it is served via http, not any sdks, i hope this is not a bad choice, the change from sdk to raw http was because sdk seems to fail for some reason and this seemed better approach in the long run.
-Lets see where this takes us.
-Now the next step is to have plan|act|observe architecture and add some tools as well!
+```
+Blonde/
+  src/
+    planner/     — LLM layer (provider-agnostic service layer)
+    runtime/     — Agent runtime (plan → act → observe loop)
+    tools/       — Tool implementations
+    types/       — TypeScript definitions
+    ui/          — TUI (Ink/React)
+  main.ts        — Entry point
+```
 
+The LLM layer is built against a custom service interface rather than vendor SDKs — raw HTTP to the provider APIs. This makes it easier to swap providers and support local models (Ollama) alongside remote ones (OpenRouter).
+
+---
+
+## Current State
+
+- Plan/Act/Observe agent loop implemented
+- Streaming planning and acting phases with live `<think>` block display
+- OpenRouter (remote) + Ollama (local) providers
+- Ollama auto-discovers model directories including USB drives
+- Intent-based tool filtering — selects only the relevant tool subset per query to keep prompts small and the model fast
+- 12 built-in tools: `read_file`, `write_file`, `edit_file`, `list_files`, `glob`, `grep`, `file_tree`, `git_status`, `git_diff`, `bash`, `web_search`, `web_fetch`
+- Session persistence with conversation history
+
+## Future Plans
+
+- [ ] Add more tools
+- [ ] Improve performance
+- [ ] Add documentation
+
+## Future Plans
+- Continue building out the agent runtime
+- Add more tools and capabilities
+- Improve the TUI experience
+- TUI built with Ink — coloured diff view, live thinking stream, tool approval flow
+
+---
+
+## Running
+
+```bash
+cp .env.example .env   # set LLM_PROVIDER, LLM_MODEL, OPENROUTER_API_KEY
+npm install
+npm run agent
+```
+
+For Ollama (local):
+```bash
+LLM_PROVIDER=ollama LLM_MODEL=qwen3.5:latest npm run agent
+```
+
+### Customising the welcome screen banner
+
+Place any PNG or JPG at `assets/blonde-banner.png` — it will render automatically on the welcome screen. Supported in all terminals (pixel-perfect in Kitty/iTerm2/WezTerm, colored blocks everywhere else).
+
+To use a different file without touching the repo:
+```
+BLONDE_BANNER=~/Pictures/my-logo.png
+```
+
+Add it to your `.env`. Leave it unset to fall back to the default wordmark.
+
+---
+
+## Roadmap
+
+- [ ] Streaming token counts and context window display improvements
+- [ ] MCP (Model Context Protocol) tool support
+- [ ] Local model hosting layer (alternative to llama.cpp dependency hell)
+- [ ] Multi-agent support
+
+---
+
+*Building this to understand it — not to ship fast.*

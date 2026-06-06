@@ -24,8 +24,22 @@ export class EditFileTool extends BaseTool {
     required: ['path', 'find', 'replace'],
   };
 
-  isDangerous = true;  // Modifies existing files
-  requiresApproval = true;  // Should ask before executing
+  isDangerous = true;
+  requiresApproval = true;
+
+  validate(args: unknown): import('./base.js').ValidationResult {
+    const base = super.validate(args);
+    if (!base.valid) return base;
+
+    const { find } = args as { find?: string };
+    if (!find || find.trim() === '') {
+      return {
+        valid: false,
+        errors: ['The "find" field cannot be empty — read the file first, then use exact text from it as the "find" value.'],
+      };
+    }
+    return { valid: true };
+  }
 
   private blockedPaths = [
     'node_modules',
@@ -86,14 +100,11 @@ export class EditFileTool extends BaseTool {
   private countMatches(content: string, search: string): number {
     let count = 0;
     let index = 0;
-    const lowerContent = content.toLowerCase();
-    const lowerSearch = search.toLowerCase();
-    
-    while ((index = lowerContent.indexOf(lowerSearch, index)) !== -1) {
+    // Case-sensitive to match what replace() will actually do
+    while ((index = content.indexOf(search, index)) !== -1) {
       count++;
-      index += lowerSearch.length;
+      index += search.length;
     }
-    
     return count;
   }
 
@@ -138,7 +149,8 @@ export class EditFileTool extends BaseTool {
         };
       }
 
-      const newContent = content.replace(find, replace);
+      // Use a function replacer so $-sequences in `replace` are treated as literals
+      const newContent = content.replace(find, () => replace);
       
       await fs.writeFile(path, newContent, 'utf-8');
       

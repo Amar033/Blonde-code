@@ -8,6 +8,8 @@ import {GrepTool} from './grep.js';
 import {GlobTool} from './glob.js';
 import {WebFetchTool} from './web-fetch.js';
 import {WebSearchTool} from './web-search.js';
+import {GitStatusTool, GitDiffTool} from './git.js';
+import {FileTreeTool} from './file-tree.js';
 
 // central regitry of all built in tools, agent runtime can see all tools by name here
 
@@ -26,6 +28,9 @@ export class ToolRegistry {
     this.register(new GlobTool());
     this.register(new WebFetchTool());
     this.register(new WebSearchTool());
+    this.register(new GitStatusTool());
+    this.register(new GitDiffTool());
+    this.register(new FileTreeTool());
   }
 
   register (tool: Tool): void {

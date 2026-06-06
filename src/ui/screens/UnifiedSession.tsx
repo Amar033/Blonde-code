@@ -1,487 +1,870 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect, memo } from 'react';
 import { Box, Text, useInput, useStdout } from 'ink';
 import TextInput from 'ink-text-input';
-import { AgentRuntime } from '../../runtime/core.js';
+import { AgentRuntime, type ApprovalCallback } from '../../runtime/core.js';
 import { ToolRegistry } from '../../tools/registry.js';
-import { LLMClient } from '../../planner/llm-client.js';
-import { colors, icons } from '../design-system.js';
-import { ToolCallBlock, ToolCallChain, PlanDisplay, ThinkingIndicator } from '../components/ToolCallDisplay.js';
-import { ToolCallLogChain } from '../components/ToolCallLog.js';
-import { Header, Mascot } from '../components/ResponsiveLayout.js';
-import type { AgentState, Plan, Observation } from '../../types/agent.js';
+import { SessionManager, type Session } from '../../sessions/session-manager.js';
+import { theme, applyThemeMode, type ThemeMode } from '../theme.js';
+import { BrailleSpinner } from '../components/BrailleSpinner.js';
+import { MarkdownBlock } from '../components/MarkdownBlock.js';
+import { FilesPanel, type FileChange } from '../components/FilesPanel.js';
+import { ToolsPanel, type ToolEntry } from '../components/ToolsPanel.js';
+import { ContextPanel } from '../components/ContextPanel.js';
+import { CommandPalette } from '../components/CommandPalette.js';
+import { AppHeader } from '../components/AppHeader.js';
+import { mockEventStream } from '../mock/eventStream.js';
+import type { Plan, Observation } from '../../types/agent.js';
+import os from 'os';
 
-interface ToolCall {
-  id: string;
-  tool: string;
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface ApprovalRequest {
+  toolName: string;
   args: Record<string, unknown>;
-  status: 'pending' | 'running' | 'success' | 'error';
-  result?: string;
-  timestamp: Date;
+  reasoning?: string;
 }
 
-interface Message {
-  id: string;
-  role: 'user' | 'assistant' | 'system' | 'tool';
+type NewItem =
+  | { kind: 'user';      text: string }
+  | { kind: 'assistant'; text: string }
+  | { kind: 'tool';      toolName: string; argsSummary: string; result: string; success: boolean; ms: number }
+  | { kind: 'plan';      stepCount: number; first: string }
+  | { kind: 'system';    text: string };
+
+type CompletedItem = NewItem & { id: string };
+
+interface ActiveTool {
+  toolName: string;
+  argsSummary: string;
+}
+
+type FocusTarget = 'input' | 'conv' | 'files' | 'tools' | 'ctx';
+
+const FOCUS_CYCLE: FocusTarget[] = ['input', 'conv', 'files', 'tools', 'ctx'];
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function argSummary(name: string, args: Record<string, unknown>): string {
+  const v = args.path ?? args.command ?? args.pattern ?? args.query ?? args.url ?? args.find;
+  if (v !== undefined) return String(v).slice(0, 50);
+  const k = Object.keys(args)[0];
+  return k ? `${k}: ${String(args[k]).slice(0, 35)}` : '';
+}
+
+function diffLineColor(line: string, fallback: string): string {
+  if (line.startsWith('+') && !line.startsWith('+++')) return theme.diff.added;
+  if (line.startsWith('-') && !line.startsWith('---')) return theme.diff.deleted;
+  if (line.startsWith('@@'))  return theme.syntax.keyword;
+  if (line.startsWith('+++') || line.startsWith('---')) return theme.text.dim;
+  if (line.startsWith('  + ')) return theme.diff.added;
+  if (line.startsWith('  - ')) return theme.diff.deleted;
+  return fallback;
+}
+
+interface DiffRow {
+  oldNum: number | null; newNum: number | null;
+  type: 'add' | 'del' | 'ctx' | 'hunk' | 'meta';
   content: string;
-  timestamp: Date;
-  isStreaming?: boolean;
-  toolName?: string;
-  toolCalls?: ToolCall[];
-  plan?: Plan;
 }
 
-interface UnifiedSessionProps {
-  initialTask?: string;
-  onComplete?: () => void;
+function buildDiffRows(summary: string): DiffRow[] {
+  const rows: DiffRow[] = [];
+  let oldN = 1, newN = 1;
+  for (const raw of summary.split('\n')) {
+    if (raw.startsWith('@@')) {
+      const m = raw.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+      if (m) { oldN = +m[1]; newN = +m[2]; }
+      rows.push({ oldNum: null, newNum: null, type: 'hunk', content: raw }); continue;
+    }
+    if (raw.startsWith('+++') || raw.startsWith('---')) {
+      rows.push({ oldNum: null, newNum: null, type: 'meta', content: raw }); continue;
+    }
+    if (raw.startsWith('+')) { rows.push({ oldNum: null, newNum: newN++, type: 'add', content: raw.slice(1) }); continue; }
+    if (raw.startsWith('-')) { rows.push({ oldNum: oldN++, newNum: null, type: 'del', content: raw.slice(1) }); continue; }
+    if (raw.startsWith(' ')) { rows.push({ oldNum: oldN++, newNum: newN++, type: 'ctx', content: raw.slice(1) }); continue; }
+    rows.push({ oldNum: null, newNum: null, type: 'meta', content: raw });
+  }
+  return rows;
 }
 
-export const UnifiedSession: React.FC<UnifiedSessionProps> = ({ initialTask, onComplete }) => {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: '1',
-      role: 'assistant',
-      content: 'Hello! I\'m Blonde Agent. You can chat with me or type "run: <task>" to start an agent task.',
-      timestamp: new Date(),
-    }
-  ]);
-  const [input, setInput] = useState('');
-  const [isAgentRunning, setIsAgentRunning] = useState(false);
-  const [agentStatus, setAgentStatus] = useState<string>('idle');
-  const [agentPlan, setAgentPlan] = useState<Plan | null>(null);
-  const [agentObservations, setAgentObservations] = useState<Observation[]>([]);
-  const [currentStreaming, setCurrentStreaming] = useState<string | null>(null);
-  const [showHelp, setShowHelp] = useState(true);
-  const [currentToolCalls, setCurrentToolCalls] = useState<ToolCall[]>([]);
-  
-  const runtimeRef = useRef<AgentRuntime | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const messageIdRef = useRef(2);
+// ─── Item renderer ────────────────────────────────────────────────────────────
 
-  // Initialize runtime
-  const initializeRuntime = useCallback(async () => {
-    if (!runtimeRef.current) {
-      const registry = new ToolRegistry();
-      runtimeRef.current = new AgentRuntime(registry, {
-        maxTurns: 30,
-        maxLoopCount: 20,
-        debug: false,
-      });
-      await runtimeRef.current.initialize();
-    }
-    return runtimeRef.current;
-  }, []);
+const ItemView = memo(({ item }: { item: CompletedItem }) => {
+  if (item.kind === 'user') {
+    return (
+      <Box marginTop={1} gap={1}>
+        <Text color={theme.role.user} bold>{'▶'}</Text>
+        <Text color={theme.role.user} bold>You</Text>
+        <Text color={theme.text.primary}>{item.text}</Text>
+      </Box>
+    );
+  }
 
-  // Add message helper
-  const addMessage = useCallback((role: Message['role'], content: string, isStreaming = false, toolName?: string) => {
-    const id = String(messageIdRef.current++);
-    setMessages(prev => [...prev, {
-      id,
-      role,
-      content,
-      timestamp: new Date(),
-      isStreaming,
-      toolName,
-    }]);
-    return id;
-  }, []);
+  if (item.kind === 'plan') {
+    const desc = item.first.length > 56 ? item.first.slice(0, 56) + '…' : item.first;
+    return (
+      <Box marginLeft={2} marginTop={1} gap={1}>
+        <Text color={theme.text.dim}>◦</Text>
+        <Text color={theme.text.dim}>Planning {item.stepCount} steps</Text>
+        <Text color={theme.text.dim}>— {desc}</Text>
+      </Box>
+    );
+  }
 
-  // Update message helper
-  const updateMessage = useCallback((id: string, content: string, isStreaming = false) => {
-    setMessages(prev => prev.map(msg => 
-      msg.id === id ? { ...msg, content, isStreaming } : msg
-    ));
-  }, []);
-
-  // Remove streaming from message
-  const finishStreaming = useCallback((id: string) => {
-    setMessages(prev => prev.map(msg => 
-      msg.id === id ? { ...msg, isStreaming: false } : msg
-    ));
-  }, []);
-
-  // Handle chat message with real LLM
-  const handleChat = useCallback(async (userInput: string) => {
-    const userMsgId = addMessage('user', userInput);
-    setAgentStatus('thinking');
-    
-    // Add placeholder for assistant response
-    const assistantMsgId = addMessage('assistant', '', true);
-    
-    try {
-      const runtime = await initializeRuntime();
-      const llm = runtime.getRuntimeLLM();
-      const tools = runtime.getToolRegistry();
-      
-      if (!llm) {
-        updateMessage(assistantMsgId, 'Error: LLM not initialized', false);
-        setAgentStatus('idle');
-        return;
-      }
-      
-      // Chat-specific system prompt - conversational, not tool-focused
-      const chatSystemPrompt = `You are a helpful and friendly coding assistant. 
-Your name is Blonde. Respond to the user's question in a conversational way.
-- If the user asks about your capabilities, describe them in plain English
-- If the user wants to do something, tell them you can help - they can use "run:" prefix to execute tasks
-- Be friendly, concise, and helpful
-- Don't respond with JSON or tool calls - just talk naturally`;
-      
-      // Use LLM directly for chat
-      let fullResponse = '';
-      
-      if (llm.supportsStreaming()) {
-        // Build a simple chat prompt
-        const chatPrompt = `${chatSystemPrompt}\n\nUser: ${userInput}\n\nAssistant:`;
-        
-        for await (const delta of llm.streamPrompt(chatPrompt, { mode: 'act', systemPrompt: chatSystemPrompt })) {
-          if (delta.type === 'content') {
-            fullResponse += delta.content;
-            updateMessage(assistantMsgId, fullResponse, true);
-          }
-        }
-        
-        // Clean up response after streaming finishes
-        fullResponse = fullResponse.replace(/\{"type":.*$/s, '').replace(/\n+$/, '').trim();
-        if (!fullResponse) {
-          fullResponse = 'I received your message. Type "run:" if you want me to execute a task.';
-        }
-        updateMessage(assistantMsgId, fullResponse, false);
-      } else {
-        // Fallback to non-streaming
-        const response = await llm.act(
-          chatSystemPrompt,
-          [],
-          tools.getAllTools(),
-          userInput
-        );
-        // Handle different response types
-        if (response.type === 'answer') {
-          fullResponse = response.content || 'I received your message.';
-        } else if (response.type === 'tool_call') {
-          fullResponse = `I'd be happy to help with that! Use "run:" prefix to execute tasks.`;
-        } else {
-          fullResponse = 'I received your message. Type "run:" if you want me to execute something.';
-        }
-      }
-      
-      finishStreaming(assistantMsgId);
-      setAgentStatus('idle');
-    } catch (error) {
-      updateMessage(assistantMsgId, `Error: ${error}`, false);
-      setAgentStatus('idle');
-    }
-  }, [addMessage, updateMessage, finishStreaming, initializeRuntime]);
-
-  // Handle agent task
-  const handleRunTask = useCallback(async (task: string) => {
-    const userMsgId = addMessage('user', `run: ${task}`);
-    setIsAgentRunning(true);
-    setAgentStatus('planning');
-    setCurrentToolCalls([]);
-    
-    try {
-      const runtime = await initializeRuntime();
-      
-      // Run the agent
-      for await (const event of runtime.run(task)) {
-        setAgentStatus(runtime.getState().status || 'running');
-        
-        if (event.type === 'plan_generated') {
-          setAgentPlan(event.plan);
-          addMessage('system', `📋 Plan: ${event.plan.steps.length} steps`, false);
-        }
-        
-        if (event.type === 'llm_response') {
-          if (event.parsed.type === 'tool_call') {
-            // Add to tool call chain
-            const newToolCall: ToolCall = {
-              id: String(Date.now()),
-              tool: event.parsed.tool,
-              args: event.parsed.args,
-              status: 'running',
-              timestamp: new Date(),
-            };
-            setCurrentToolCalls(prev => [...prev, newToolCall]);
-            
-            addMessage('system', `🔧 ${event.parsed.tool}(${JSON.stringify(event.parsed.args)})`, false, event.parsed.tool);
-          } else if (event.parsed.type === 'answer') {
-            addMessage('assistant', event.parsed.content, false);
-          }
-        }
-        
-        if (event.type === 'observation_ready') {
-          setAgentObservations(prev => [...prev, event.observation]);
-          
-          // Update the last tool call with result
-          setCurrentToolCalls(prev => {
-            const updated = [...prev];
-            const lastCall = updated[updated.length - 1];
-            if (lastCall) {
-              lastCall.status = event.observation.success ? 'success' : 'error';
-              lastCall.result = event.observation.summary;
-            }
-            return updated;
-          });
-          
-          addMessage('system', `${event.observation.success ? '✓' : '✗'} ${event.observation.summary}`, false);
-        }
-        
-        if (event.type === 'complete') {
-          addMessage('assistant', event.finalResponse, false);
-        }
-        
-        if (event.type === 'abort') {
-          addMessage('system', `⚠️ Aborted: ${event.reason}`, false);
-        }
-      }
-    } catch (error) {
-      addMessage('system', `Error: ${error}`, false);
-    } finally {
-      setIsAgentRunning(false);
-      setAgentStatus('idle');
-      setAgentPlan(null);
-      setCurrentToolCalls([]);
-    }
-  }, [addMessage, initializeRuntime]);
-
-  // Detect user intent - chat vs task
-  const detectIntent = (userInput: string): 'chat' | 'task' => {
-    const lower = userInput.toLowerCase();
-    
-    // Explicit commands
-    if (lower.startsWith('run:') || lower.startsWith('execute:') || lower.startsWith('do:')) {
-      return 'task';
-    }
-    
-    // Task keywords - file operations, code actions
-    const taskPatterns = [
-      // File operations
-      /\bread\b.*\bfile\b/i, /\bwrite\b.*\bfile\b/i, /\bedit\b.*\bfile\b/i,
-      /\blist\b.*\bfiles\b/i, /\bcreate\b.*\bfile\b/i, /\bdelete\b.*\bfile\b/i,
-      /\bsearch\b/i, /\bfind\b.*\bfile\b/i, /\bgrep\b/i,
-      // Code actions
-      /\bimplement\b/i, /\brefactor\b/i, /\bfix\b.*\bbug\b/i, /\bdebug\b/i,
-      /\bbuild\b/i, /\btest\b/i, /\brun\b.*\bcode\b/i,
-      // Project actions
-      /\binstall\b/i, /\bsetup\b/i, /\bconfigure\b/i,
-      /\bcheck\b.*\bdependencies\b/i, /\bsummarize\b/i,
-      // General task indicators
-      /^(list|show|create|make|add|remove|delete|update|fix|check|find|search|read|write)/i,
-    ];
-    
-    for (const pattern of taskPatterns) {
-      if (pattern.test(userInput)) {
-        return 'task';
-      }
-    }
-    
-    // Chat indicators - greetings, questions, general conversation
-    const chatPatterns = [
-      /^(hi|hello|hey|howdy|good morning|good afternoon|good evening)/i,
-      /\bhow are you\b/i, /\bwhat are you\b/i, /\bwho are you\b/i,
-      /\bcan you\b/i, /\bcould you\b/i, /\bwould you\b/i,
-      /\bhelp me\b/i, /\bexplain\b/i, /\btell me about\b/i,
-      /\bwhat is\b/i, /\bwhat are\b/i, /\bhow does\b/i, /\bwhy\b/i,
-      /\?$/,  // Ends with question mark
-    ];
-    
-    for (const pattern of chatPatterns) {
-      if (pattern.test(userInput)) {
-        return 'chat';
-      }
-    }
-    
-    // Default to chat for short inputs or ambiguous cases
-    if (userInput.split(/\s+/).length <= 5) {
-      return 'chat';
-    }
-    
-    // For longer inputs, default to task (more likely to be instructions)
-    return 'task';
-  };
-
-  // Handle input submission
-  const handleSubmit = useCallback(() => {
-    if (!input.trim()) return;
-    
-    const userInput = input.trim();
-    setInput('');
-    
-    // Special commands
-    if (userInput === 'stop' && isAgentRunning) {
-      runtimeRef.current?.abort();
-      setIsAgentRunning(false);
-      setAgentStatus('idle');
-      addMessage('system', 'Agent stopped.');
-      return;
-    }
-    if (userInput === 'clear') {
-      setMessages([{
-        id: '1',
-        role: 'assistant',
-        content: 'Conversation cleared.',
-        timestamp: new Date(),
-      }]);
-      messageIdRef.current = 2;
-      return;
-    }
-    if (userInput === '?') {
-      setShowHelp(!showHelp);
-      return;
-    }
-    if (userInput === 'chat') {
-      // Force chat mode
-      handleChat(userInput);
-      return;
-    }
-    if (userInput.startsWith('run:') || userInput.startsWith('execute:') || userInput.startsWith('do:')) {
-      // Explicit task
-      const task = userInput.replace(/^(run:|execute:|do:)\s*/i, '').trim();
-      if (task) {
-        handleRunTask(task);
-      }
-      return;
-    }
-    
-    // Auto-detect intent
-    const intent = detectIntent(userInput);
-    
-    if (intent === 'task') {
-      handleRunTask(userInput);
-    } else {
-      handleChat(userInput);
-    }
-  }, [input, isAgentRunning, showHelp, addMessage, handleChat, handleRunTask, detectIntent]);
-
-  // Keyboard shortcuts
-  useInput((inputStr, key) => {
-    if (key.ctrl && inputStr === 'c') {
-      if (isAgentRunning) {
-        runtimeRef.current?.abort();
-        setIsAgentRunning(false);
-        setAgentStatus('idle');
-        addMessage('system', 'Operation cancelled.');
-      }
-    }
-    if (key.ctrl && inputStr === 'l') {
-      setMessages([{
-        id: '1',
-        role: 'assistant',
-        content: 'Conversation cleared.',
-        timestamp: new Date(),
-      }]);
-      messageIdRef.current = 2;
-    }
-  });
-
-  // Run initial task if provided
-  useEffect(() => {
-    if (initialTask) {
-      handleRunTask(initialTask);
-    }
-  }, [initialTask]);
-
-  return (
-    <Box flexDirection="column" height="100%">
-      {/* Header - responsive to terminal size */}
-      <Header 
-        isAgentRunning={isAgentRunning}
-        agentStatus={agentStatus}
-        agentPlan={agentPlan}
-        isFullscreen={true}
-      />
-
-      {/* Messages */}
-      <Box
-        flexDirection="column"
-        marginTop={1}
-        borderStyle="round"
-        borderColor={colors.border}
-        paddingX={2}
-        paddingY={1}
-        flexGrow={1}
-        overflow="hidden"
-      >
-        {/* Show plan if available */}
-        {agentPlan && isAgentRunning && (
-          <Box marginBottom={1}>
-            <PlanDisplay steps={agentPlan.steps} currentStep={agentPlan.currentStep} />
-          </Box>
-        )}
-        
-        {/* Show tool call chain if running - inline style */}
-        {currentToolCalls.length > 0 && (
-          <Box marginBottom={1} flexDirection="column">
-            <ToolCallLogChain calls={currentToolCalls} />
-          </Box>
-        )}
-        
-        {messages.map((msg) => (
-          <Box key={msg.id} flexDirection="column" marginBottom={1}>
-            {msg.role === 'user' && (
-              <Box>
-                <Text bold color={colors.brand}>You: </Text>
-                <Text color={colors.text}>{msg.content}</Text>
+  if (item.kind === 'tool' && item.toolName === 'git_diff' && item.success) {
+    const rows = buildDiffRows(item.result);
+    const meta = rows.find(r => r.type === 'meta')?.content ?? '';
+    return (
+      <Box flexDirection="column" marginLeft={2} marginTop={1}>
+        <Box gap={1}>
+          <Text color={theme.status.success}>◆</Text>
+          <Text bold color={theme.syntax.keyword}>git_diff</Text>
+          {item.argsSummary && <Text color={theme.text.dim}>({item.argsSummary})</Text>}
+          <Text color={theme.text.dim}>· {item.ms}ms</Text>
+        </Box>
+        <Box marginLeft={4} flexDirection="column">
+          {meta ? <Text color={theme.text.dim}>{meta}</Text> : null}
+          {rows.filter(r => r.type !== 'meta').map((row, i) => {
+            if (row.type === 'hunk') return <Box key={i}><Text color={theme.syntax.keyword}>{row.content.slice(0, 72)}</Text></Box>;
+            const pad = (n: number | null) => n !== null ? String(n).padStart(3) : '   ';
+            const marker = row.type === 'add' ? '+' : row.type === 'del' ? '-' : ' ';
+            const bg = row.type === 'add' ? 'green' : row.type === 'del' ? 'red' : undefined;
+            const fg = row.type === 'ctx' ? theme.text.dim : 'white';
+            return (
+              <Box key={i}>
+                <Text color={theme.text.dim}>{pad(row.oldNum)} {pad(row.newNum)} </Text>
+                <Text backgroundColor={bg} color={fg} bold={row.type !== 'ctx'}>{marker} {row.content.slice(0, 68)}</Text>
               </Box>
-            )}
-            {msg.role === 'assistant' && (
-              <Box flexDirection="column">
-                <Box>
-                  <Text bold color={colors.working}>Blonde: </Text>
-                </Box>
-                <Box marginLeft={2} flexWrap="wrap">
-                  <Text color={colors.text}>{msg.content}</Text>
-                  {msg.isStreaming && <Text color={colors.thinking}>▌</Text>}
-                </Box>
-              </Box>
-            )}
-            {msg.role === 'system' && (
-              <Box>
-                <Text dimColor>{'>'} </Text>
-                <Text color={colors.textMuted}>{msg.content}</Text>
-              </Box>
-            )}
-            {msg.role === 'tool' && (
-              <Box marginLeft={2}>
-                <Text bold color={colors.warning}>🔧 {msg.toolName}: </Text>
-              </Box>
-            )}
+            );
+          })}
+        </Box>
+      </Box>
+    );
+  }
+
+  if (item.kind === 'tool') {
+    const icon  = item.success ? '◆' : '✗';
+    const ic    = item.success ? theme.status.success : theme.status.error;
+    const rc    = item.success ? theme.text.secondary : theme.status.error;
+    const lines = item.result.slice(0, 360).split('\n');
+    const trunc = item.result.length > 360;
+    return (
+      <Box flexDirection="column" marginLeft={2} marginTop={1}>
+        <Box gap={1}>
+          <Text color={ic}>{icon}</Text>
+          <Text bold color={theme.syntax.keyword}>{item.toolName}</Text>
+          {item.argsSummary && <Text color={theme.text.dim}>({item.argsSummary})</Text>}
+          <Text color={theme.text.dim}>· {item.ms}ms</Text>
+        </Box>
+        {lines.map((line, i) => (
+          <Box key={i} marginLeft={2}>
+            <Text color={theme.text.dim}>{i === 0 ? '└ ' : '  '}</Text>
+            <Text color={diffLineColor(line, rc)}>
+              {line}{i === lines.length - 1 && trunc ? '…' : ''}
+            </Text>
           </Box>
         ))}
       </Box>
+    );
+  }
 
-      {/* Input */}
-      <Box
-        marginTop={1}
-        borderStyle="round"
-        borderColor={isAgentRunning ? colors.warning : colors.borderActive}
-        paddingX={2}
-        paddingY={0}
-      >
-        <Text dimColor>{'> '}</Text>
-        <TextInput 
-          value={input}
-          onChange={setInput}
-          onSubmit={handleSubmit}
-          placeholder={isAgentRunning ? "Agent running... (type 'stop' to cancel)" : "Type message or 'run: <task>'"}
-        />
+  if (item.kind === 'assistant') {
+    return (
+      <Box flexDirection="column" marginTop={1}>
+        <Box gap={1}>
+          <Text color={theme.role.assistant} bold>{'◆'}</Text>
+          <Text color={theme.role.assistant} bold>Assistant</Text>
+        </Box>
+        <Box marginLeft={2} flexDirection="column">
+          <MarkdownBlock text={item.text} />
+        </Box>
+      </Box>
+    );
+  }
+
+  if (item.kind === 'system') {
+    return (
+      <Box marginTop={1} gap={1}>
+        <Text color={theme.status.warning}>{'!'}</Text>
+        <Text color={theme.text.secondary}>{item.text}</Text>
+      </Box>
+    );
+  }
+
+  return null;
+});
+
+// ─── Main component ───────────────────────────────────────────────────────────
+
+interface UnifiedSessionProps {
+  initialTask?: string;
+  resumeSession?: Session;
+  mockMode?: boolean;
+  onComplete?: () => void;
+  onShowSessions?: () => void;
+}
+
+export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
+  initialTask, resumeSession, mockMode, onComplete, onShowSessions
+}) => {
+  const { stdout } = useStdout();
+  const [termCols, setTermCols] = useState(stdout.columns || 80);
+  const [termRows, setTermRows] = useState(stdout.rows || 24);
+
+  useEffect(() => {
+    const onResize = () => { setTermCols(stdout.columns || 80); setTermRows(stdout.rows || 24); };
+    stdout.on('resize', onResize);
+    return () => { stdout.off('resize', onResize); };
+  }, [stdout]);
+
+  const useSidebar = termCols >= 80;
+  const sideWidth  = useSidebar ? Math.max(22, Math.floor(termCols * 0.32)) : 0;
+
+  // Session timer
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick(n => n + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const mm = String(Math.floor(tick / 60)).padStart(2, '0');
+  const ss = String(tick % 60).padStart(2, '0');
+
+  // Core state
+  const [completed,       setCompleted]       = useState<CompletedItem[]>([]);
+  const [activeTool,      setActiveTool]      = useState<ActiveTool | null>(null);
+  const [isThinking,      setIsThinking]      = useState(false);
+  const [agentStatus,     setAgentStatus]     = useState('idle');
+  const [isRunning,       setIsRunning]       = useState(false);
+  const [input,           setInput]           = useState('');
+  const [turns,           setTurns]           = useState(0);
+  const [showHelp,        setShowHelp]        = useState(false);
+  const [showPalette,     setShowPalette]     = useState(false);
+  const [approvalRequest, setApprovalRequest] = useState<ApprovalRequest | null>(null);
+  const [currentModel,    setCurrentModel]    = useState(process.env.LLM_MODEL || 'qwen3.5:latest');
+  const [tokenUsage,      setTokenUsage]      = useState(0);
+  const [contextWindow,   setContextWindow]   = useState(8192);
+  const [contextWarned,   setContextWarned]   = useState(false);
+  const [streamThinking,  setStreamThinking]  = useState('');
+  const [streamResponse,  setStreamResponse]  = useState('');
+  const [fileChanges,     setFileChanges]     = useState<FileChange[]>([]);
+  const [toolLog,         setToolLog]         = useState<ToolEntry[]>([]);
+  const [scrollUp,        setScrollUp]        = useState(0);
+  const [focus,           setFocus]           = useState<FocusTarget>('input');
+  const [inputHistory,    setInputHistory]    = useState<string[]>([]);
+  const [historyIdx,      setHistoryIdx]      = useState(-1);
+
+  const idRef               = useRef(0);
+  const toolStartMs         = useRef(Date.now());
+  const toolCounterRef      = useRef(0);
+  const runtimeRef          = useRef<AgentRuntime | null>(null);
+  const initPromiseRef      = useRef<Promise<AgentRuntime> | null>(null);
+  const sessionMgrRef       = useRef<SessionManager | null>(null);
+  const approvalResolveRef  = useRef<((v: boolean) => void) | null>(null);
+  const firstMessageRef     = useRef<string | null>(null);
+  const historyToRestoreRef = useRef<Array<{role: 'user'|'assistant'; content: string}> | null>(null);
+  const runningToolIdRef    = useRef<string | null>(null);
+
+  const CWD = process.cwd().replace(os.homedir(), '~');
+
+  const ctxPct   = contextWindow > 0 ? Math.round((tokenUsage / contextWindow) * 100) : 0;
+  const ctxColor = ctxPct >= 90 ? theme.status.error : ctxPct >= 75 ? theme.status.warning : theme.text.dim;
+
+  // ── Helpers ────────────────────────────────────────────────
+
+  const push = useCallback((item: NewItem) => {
+    const id = String(idRef.current++);
+    setCompleted(prev => [...prev, { ...item, id }]);
+  }, []);
+
+  const clearAll = useCallback(() => {
+    setCompleted([]);
+    setFileChanges([]);
+    setToolLog([]);
+    setScrollUp(0);
+    idRef.current = 0;
+  }, []);
+
+  const clearStream = useCallback(() => {
+    setStreamThinking('');
+    setStreamResponse('');
+  }, []);
+
+  // Track file changes from tool results
+  const trackFileChange = useCallback((toolName: string, obs: Observation) => {
+    const p = obs.input.path as string | undefined;
+    if (!p) return;
+    if (toolName === 'write_file' && obs.success) {
+      setFileChanges(prev => {
+        const exists = prev.some(f => f.path === p);
+        return exists ? prev : [...prev, { path: p, type: 'A' }];
+      });
+    }
+    if (toolName === 'edit_file' && obs.success) {
+      setFileChanges(prev => {
+        const idx = prev.findIndex(f => f.path === p);
+        if (idx >= 0) return prev.map((f, i) => i === idx ? { ...f, type: 'M' } : f);
+        return [...prev, { path: p, type: 'M' }];
+      });
+    }
+  }, []);
+
+  // ── Approval callback ──────────────────────────────────────
+
+  const makeApprovalCallback = useCallback((): ApprovalCallback => {
+    return (toolName, args, reasoning) =>
+      new Promise<boolean>(resolve => {
+        setApprovalRequest({ toolName, args, reasoning });
+        approvalResolveRef.current = (v: boolean) => {
+          setApprovalRequest(null);
+          approvalResolveRef.current = null;
+          resolve(v);
+        };
+      });
+  }, []);
+
+  // ── Session init ───────────────────────────────────────────
+
+  useEffect(() => {
+    if (mockMode) return;
+    const mgr = new SessionManager();
+    sessionMgrRef.current = mgr;
+    mgr.init().then(() => {
+      if (resumeSession) {
+        historyToRestoreRef.current = resumeSession.messages
+          .filter(m => m.role === 'user' || m.role === 'assistant')
+          .map(m => ({ role: m.role as 'user'|'assistant', content: m.content }));
+        for (const msg of resumeSession.messages) {
+          if (msg.role === 'user')      push({ kind: 'user', text: msg.content });
+          else if (msg.role === 'assistant') push({ kind: 'assistant', text: msg.content });
+        }
+        push({ kind: 'system', text: `Resumed session: ${resumeSession.name}` });
+        mgr.create(resumeSession.model || (process.env.LLM_MODEL ?? 'qwen3.5:latest'),
+                   resumeSession.provider || (process.env.LLM_PROVIDER ?? 'ollama'));
+        mgr.setName(resumeSession.name);
+      } else {
+        mgr.create(process.env.LLM_MODEL ?? 'qwen3.5:latest', process.env.LLM_PROVIDER ?? 'ollama');
+      }
+      if (initialTask) runTask(initialTask);
+    }).catch(() => { if (initialTask) runTask(initialTask); });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Mock mode: run immediately with fake event stream
+  useEffect(() => {
+    if (!mockMode) return;
+    runTask('Build a FastAPI backend with SQLite database');
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Runtime init ───────────────────────────────────────────
+
+  const initRuntime = useCallback(async (model?: string) => {
+    if (model && model !== currentModel) {
+      runtimeRef.current = null;
+      initPromiseRef.current = null;
+      process.env.LLM_MODEL = model;
+      setCurrentModel(model);
+    }
+    if (runtimeRef.current) return runtimeRef.current;
+    if (!initPromiseRef.current) {
+      initPromiseRef.current = (async () => {
+        const reg = new ToolRegistry();
+        const rt  = new AgentRuntime(reg, { maxTurns: 30, maxLoopCount: 20, debug: false });
+        rt.setApprovalCallback(makeApprovalCallback());
+        await rt.initialize();
+        runtimeRef.current = rt;
+        const ctxWin = await rt.getContextWindow();
+        setContextWindow(ctxWin);
+        return rt;
+      })();
+    }
+    return initPromiseRef.current;
+  }, [makeApprovalCallback, currentModel]);
+
+  // ── Agent runner ───────────────────────────────────────────
+
+  const runTask = useCallback(async (task: string) => {
+    push({ kind: 'user', text: task });
+    setIsRunning(true);
+    setIsThinking(true);
+    setAgentStatus('planning');
+    setScrollUp(0);
+
+    const mgr = sessionMgrRef.current;
+    mgr?.addMessage('user', task);
+
+    try {
+      const source = mockMode
+        ? mockEventStream()
+        : (async function*() {
+            const runtime = await initRuntime();
+            if (historyToRestoreRef.current) {
+              runtime.loadConversationHistory(historyToRestoreRef.current);
+              historyToRestoreRef.current = null;
+            }
+            const isFirst = mgr && !firstMessageRef.current;
+            if (isFirst) firstMessageRef.current = task;
+            yield* runtime.run(task);
+            // name session after first run
+            if (isFirst) {
+              const llm = runtime.getRuntimeLLM();
+              if (llm) {
+                llm.generateSessionName(task).then(name => {
+                  mgr!.setName(name);
+                  mgr!.save().catch(() => {});
+                }).catch(() => {});
+              }
+            }
+          })();
+
+      for await (const event of source) {
+        if (!mockMode) {
+          const runtime = runtimeRef.current;
+          if (runtime) {
+            setAgentStatus(runtime.getState().status);
+            const usage = runtime.getTokenUsage();
+            if (usage > 0) { setTokenUsage(usage); mgr?.updateTokenUsage(usage); }
+          }
+        }
+
+        if (event.type === 'llm_streaming') {
+          if (event.inThinkBlock) {
+            setStreamThinking(event.thinking ?? '');
+            setStreamResponse('');
+          } else if (event.thinking) {
+            setStreamThinking(event.thinking);
+            const thinkEnd = event.delta.indexOf('</think>');
+            const cleaned = thinkEnd !== -1
+              ? event.delta.slice(thinkEnd + 8).trim()
+              : event.delta.replace(/<think>[\s\S]*<\/think>/g, '').trim();
+            setStreamResponse(cleaned);
+          } else {
+            setStreamResponse(event.delta.slice(0, 400));
+          }
+        }
+
+        if (event.type === 'plan_generated') {
+          clearStream();
+          push({ kind: 'plan', stepCount: event.plan.steps.length, first: event.plan.steps[0] ?? '' });
+          setIsThinking(false);
+        }
+
+        if (event.type === 'llm_response' && event.parsed.type === 'tool_call') {
+          clearStream();
+          toolStartMs.current = Date.now();
+          const toolId = `tool-${toolCounterRef.current++}`;
+          runningToolIdRef.current = toolId;
+          const tc = event.parsed as Extract<typeof event.parsed, { type: 'tool_call' }>;
+          setActiveTool({ toolName: tc.tool, argsSummary: argSummary(tc.tool, tc.args) });
+          setToolLog(prev => [...prev, { id: toolId, name: tc.tool, status: 'running' }]);
+        }
+
+        if (event.type === 'observation_ready') {
+          clearStream();
+          const obs  = event.observation;
+          const ms   = Date.now() - toolStartMs.current;
+          const tid  = runningToolIdRef.current;
+          setActiveTool(null);
+          runningToolIdRef.current = null;
+          push({ kind: 'tool', toolName: obs.toolName, argsSummary: argSummary(obs.toolName, obs.input), result: obs.summary, success: obs.success, ms });
+          trackFileChange(obs.toolName, obs);
+          if (tid) {
+            setToolLog(prev => prev.map(t => t.id === tid
+              ? { ...t, status: obs.success ? 'done' : 'error', ms }
+              : t));
+          }
+        }
+
+        if (event.type === 'complete') {
+          clearStream();
+          setIsThinking(false);
+          push({ kind: 'assistant', text: event.finalResponse });
+          setTurns(t => t + 1);
+          mgr?.addMessage('assistant', event.finalResponse);
+          if (!mockMode) {
+            const runtime = runtimeRef.current;
+            if (runtime) {
+              const finalUsage = runtime.getTokenUsage();
+              if (finalUsage > 0) {
+                setTokenUsage(finalUsage);
+                const pct = Math.round((finalUsage / contextWindow) * 100);
+                if (pct >= 80 && !contextWarned) {
+                  setContextWarned(true);
+                  push({ kind: 'system', text: `Context ${pct}% full (${finalUsage}/${contextWindow} tokens). Consider /new soon.` });
+                }
+              }
+            }
+          }
+        }
+
+        if (event.type === 'abort') {
+          clearStream();
+          setIsThinking(false);
+          push({ kind: 'system', text: `Stopped: ${event.reason}` });
+        }
+      }
+    } catch (err) {
+      push({ kind: 'system', text: `Error: ${err}` });
+    } finally {
+      clearStream();
+      setIsRunning(false);
+      setIsThinking(false);
+      setActiveTool(null);
+      setAgentStatus('idle');
+      mgr?.save().catch(() => {});
+    }
+  }, [push, initRuntime, contextWindow, contextWarned, trackFileChange, mockMode]);
+
+  // ── Command handler ────────────────────────────────────────
+
+  const handleCommand = useCallback((val: string) => {
+    if (val === 'stop' && isRunning) { runtimeRef.current?.abort(); return; }
+    if (val === 'clear' || val === '/clear') { clearAll(); return; }
+    if (val === '?' || val === 'help' || val === '/help') { setShowHelp(h => !h); return; }
+    if (val === '/sessions' || val === 'sessions') { onShowSessions?.(); return; }
+    if (val === '/new' || val === 'new session') {
+      runtimeRef.current = null;
+      initPromiseRef.current = null;
+      firstMessageRef.current = null;
+      setContextWarned(false);
+      setTokenUsage(0);
+      setTurns(0);
+      sessionMgrRef.current?.create(currentModel, process.env.LLM_PROVIDER ?? 'ollama');
+      clearAll();
+      push({ kind: 'system', text: 'New session started.' });
+      return;
+    }
+    if (val === '/model' || val === '/models') {
+      const provider = process.env.LLM_PROVIDER || 'ollama';
+      if (provider === 'ollama') {
+        import('../../planner/providers/ollama.js').then(async ({ OllamaProvider, findOllamaModelsDirs }: any) => {
+          const p = new OllamaProvider(currentModel, process.env.OLLAMA_BASE_URL || 'http://localhost:11434');
+          const [models, dirs] = await Promise.all([p.listModels(), findOllamaModelsDirs()]);
+          push({ kind: 'system', text: `current: ${currentModel}  available: ${models.join(', ')}  dir: ${dirs[0]?.path ?? '~/.ollama/models'}  /model <name> to switch` });
+        }).catch(() => push({ kind: 'system', text: `current: ${currentModel} (${provider})` }));
+      } else {
+        push({ kind: 'system', text: `current: ${currentModel} (${provider})` });
+      }
+      return;
+    }
+    if (val.startsWith('/model ')) {
+      const m = val.slice(7).trim();
+      if (!m) return;
+      push({ kind: 'system', text: `Switching to ${m}…` });
+      initRuntime(m).then(() => {
+        sessionMgrRef.current?.create(m, process.env.LLM_PROVIDER ?? 'ollama');
+        push({ kind: 'system', text: `Model switched to ${m}` });
+      }).catch(err => push({ kind: 'system', text: `Failed: ${err}` }));
+      return;
+    }
+    if (val.startsWith('/theme ')) {
+      const mode = val.slice(7).trim() as ThemeMode;
+      applyThemeMode(mode);
+      push({ kind: 'system', text: `Theme set to ${mode}` });
+      return;
+    }
+    if (isRunning) return;
+    runTask(val);
+  }, [isRunning, clearAll, push, onShowSessions, currentModel, initRuntime, runTask]);
+
+  // ── Input submit ───────────────────────────────────────────
+
+  const handleSubmit = useCallback(() => {
+    const val = input.trim();
+    if (!val) return;
+    setInput('');
+    setHistoryIdx(-1);
+    setInputHistory(prev => [val, ...prev.slice(0, 49)]);
+
+    // Approval flow
+    if (approvalRequest && approvalResolveRef.current) {
+      const lv = val.toLowerCase();
+      if (lv === 'y' || lv === 'yes') { approvalResolveRef.current(true);  return; }
+      if (lv === 'n' || lv === 'no')  { approvalResolveRef.current(false); return; }
+      push({ kind: 'system', text: `Type 'y' to approve or 'n' to deny.` });
+      return;
+    }
+
+    handleCommand(val);
+  }, [input, approvalRequest, push, handleCommand]);
+
+  // ── Keyboard handling ──────────────────────────────────────
+
+  useInput((char, key) => {
+    // Ctrl+C — interrupt
+    if (key.ctrl && char === 'c' && isRunning) {
+      runtimeRef.current?.abort();
+      setIsRunning(false);
+      setAgentStatus('idle');
+      return;
+    }
+    // Ctrl+L — clear
+    if (key.ctrl && char === 'l') { clearAll(); return; }
+    // Ctrl+K — command palette toggle (only when not in palette)
+    if (key.ctrl && char === 'k' && !showPalette) { setShowPalette(true); return; }
+
+    // Page Up / Page Down — scroll conversation from ANY focus, no Tab required
+    if (key.pageUp)   { setScrollUp(s => s + 10); return; }
+    if (key.pageDown) { setScrollUp(s => Math.max(0, s - 10)); return; }
+
+    // Tab — cycle panel focus
+    if (key.tab) {
+      const idx = FOCUS_CYCLE.indexOf(focus);
+      const next = key.shift
+        ? FOCUS_CYCLE[(idx - 1 + FOCUS_CYCLE.length) % FOCUS_CYCLE.length]
+        : FOCUS_CYCLE[(idx + 1) % FOCUS_CYCLE.length];
+      setFocus(next);
+      return;
+    }
+
+    // Conversation panel navigation (vim-style, only when conv is focused via Tab)
+    if (focus === 'conv') {
+      if (key.upArrow || char === 'k')   { setScrollUp(s => s + 3); return; }
+      if (key.downArrow || char === 'j') { setScrollUp(s => Math.max(0, s - 3)); return; }
+      if (char === 'g') { setScrollUp(999); return; }
+      if (char === 'G') { setScrollUp(0); return; }
+    }
+
+    // Input history navigation (only when input is focused and matches)
+    if (focus === 'input') {
+      if (key.upArrow && input === '') {
+        const newIdx = Math.min(historyIdx + 1, inputHistory.length - 1);
+        if (newIdx >= 0 && newIdx < inputHistory.length) {
+          setHistoryIdx(newIdx);
+          setInput(inputHistory[newIdx] ?? '');
+        }
+        return;
+      }
+      if (key.downArrow && historyIdx >= 0) {
+        const newIdx = historyIdx - 1;
+        setHistoryIdx(newIdx);
+        setInput(newIdx >= 0 ? (inputHistory[newIdx] ?? '') : '');
+        return;
+      }
+    }
+
+    // Quit with q when input is empty and not running
+    if (char === 'q' && input === '' && !isRunning && focus === 'input') {
+      process.exit(0);
+    }
+  }, { isActive: !showPalette });
+
+  // ── Layout heights ────────────────────────────────────────
+  // palette lives between content row and input — reduce convH when shown
+
+  const paletteH = showPalette ? 12 : 0;
+  const convH    = Math.max(6, termRows - 3 - paletteH - 4);
+
+  // sidebar panel heights — sum must equal convH
+  const filesH = Math.max(4, Math.floor(convH * 0.27));
+  const toolsH = Math.max(5, Math.floor(convH * 0.44));
+  const ctxH   = Math.max(4, convH - filesH - toolsH);
+
+  // ── Derived ───────────────────────────────────────────────
+
+  const inputBorder = approvalRequest ? theme.status.warning
+    : isRunning ? theme.status.running
+    : focus === 'input' ? theme.border.active
+    : theme.border.normal;
+
+  const inputPlaceholder = approvalRequest
+    ? "type 'y' to approve or 'n' to deny, then Enter"
+    : isRunning
+    ? "agent running — type 'stop' to cancel"
+    : 'Ask anything… (Ctrl+K for commands)';
+
+  const footerHint = focus === 'conv'
+    ? '↑↓/jk · scroll   PgUp/PgDn · scroll   g · top   G · bottom   Tab · panels'
+    : focus !== 'input'
+    ? 'PgUp/PgDn · scroll   Tab · panels'
+    : isRunning
+    ? 'PgUp/PgDn · scroll   stop · cancel   Ctrl+C · interrupt   Ctrl+K · cmds'
+    : 'Enter · submit   PgUp/PgDn · scroll   ↑ · history   Tab · panels   Ctrl+K · cmds';
+
+  const convBorder  = focus === 'conv' ? theme.border.active : theme.border.normal;
+  const scrollPadH  = scrollUp > 0 ? Math.min(scrollUp, convH - 6) : 0;
+
+  // ─── Render ───────────────────────────────────────────────
+
+  return (
+    <Box flexDirection="column" height={termRows}>
+
+      {/* ── Header — shared component, matches welcome screen ── */}
+      <AppHeader
+        model={currentModel}
+        tokenUsage={tokenUsage}
+        timeDisplay={`${mm}:${ss}`}
+      />
+
+      {/* ── Content row — fixed height, sidebar always visible ── */}
+      <Box flexDirection="row" gap={1} height={convH}>
+
+        {/* Left: conversation panel */}
+        <Box flexDirection="column" flexGrow={1} borderStyle="round" borderColor={convBorder}>
+          {/* Panel title */}
+          <Box paddingX={1}>
+            <Text color={theme.text.secondary} bold>Conversation</Text>
+            {scrollUp > 0 && <Text color={theme.text.dim}> ↑ scrolled</Text>}
+            {turns > 0 && <Text color={theme.text.dim}> · turn {turns}</Text>}
+          </Box>
+
+          {/* column-reverse: newest content at bottom, old content clips at top */}
+          <Box flexDirection="column-reverse" flexGrow={1} overflow="hidden">
+
+            {/* Scroll padding — pushes content up when user scrolls */}
+            {scrollPadH > 0 && <Box height={scrollPadH} flexShrink={0} />}
+
+            {/* Help panel — bottom of reversed area when shown */}
+            {showHelp && (
+              <Box flexDirection="column" borderStyle="single" borderColor={theme.border.normal}
+                paddingX={2} paddingY={1} marginX={1} marginBottom={1}>
+                <Text bold color={theme.brand}>Commands</Text>
+                <Text color={theme.text.dim}>stop / Ctrl+C  · interrupt agent</Text>
+                <Text color={theme.text.dim}>/clear /Ctrl+L · clear conversation</Text>
+                <Text color={theme.text.dim}>/new           · fresh session</Text>
+                <Text color={theme.text.dim}>/sessions      · browse sessions</Text>
+                <Text color={theme.text.dim}>/model [name]  · list / switch model</Text>
+                <Text color={theme.text.dim}>/theme [mode]  · dark / light / dark-ansi</Text>
+                <Text color={theme.text.dim}>Ctrl+K         · command palette</Text>
+                <Text color={theme.text.dim}>Tab            · cycle panel focus</Text>
+                <Text color={theme.text.dim}>?              · toggle this help</Text>
+              </Box>
+            )}
+
+            {/* Approval panel — bottom of content, input stays focused */}
+            {approvalRequest && (
+              <Box flexDirection="column" borderStyle="round"
+                borderColor={theme.status.warning} paddingX={2} paddingY={1}
+                marginX={1} marginBottom={1}>
+                <Box gap={1}>
+                  <Text color={theme.status.warning}>⚠</Text>
+                  <Text bold color={theme.text.primary}>Approval needed —</Text>
+                  <Text bold color={theme.syntax.keyword}>{approvalRequest.toolName}</Text>
+                  {approvalRequest.args['path'] != null && (
+                    <Text color={theme.text.dim}>→ {String(approvalRequest.args['path'])}</Text>
+                  )}
+                </Box>
+                {approvalRequest.toolName === 'edit_file' && (
+                  <Box flexDirection="column" marginTop={1}>
+                    {String(approvalRequest.args['find'] ?? '').split('\n').map((l, i) => (
+                      <Box key={`f${i}`} gap={1}><Text color={theme.diff.deleted}>─</Text><Text color={theme.diff.deleted}>{l.slice(0, 100)}</Text></Box>
+                    ))}
+                    {String(approvalRequest.args['replace'] ?? '').split('\n').map((l, i) => (
+                      <Box key={`r${i}`} gap={1}><Text color={theme.diff.added}>+</Text><Text color={theme.diff.added}>{l.slice(0, 100)}</Text></Box>
+                    ))}
+                  </Box>
+                )}
+                {approvalRequest.toolName === 'bash' && approvalRequest.args['command'] != null && (
+                  <Box marginTop={1}>
+                    <Text color={theme.syntax.keyword}>$ </Text>
+                    <Text color={theme.text.dim}>{String(approvalRequest.args['command']).slice(0, 120)}</Text>
+                  </Box>
+                )}
+                {approvalRequest.reasoning && (
+                  <Text color={theme.text.dim}>{approvalRequest.reasoning.slice(0, 120)}</Text>
+                )}
+                <Box marginTop={1} gap={3}>
+                  <Text color={theme.status.success}>[y] Approve</Text>
+                  <Text color={theme.status.error}>[n] Deny</Text>
+                </Box>
+              </Box>
+            )}
+
+            {/* Context warning */}
+            {ctxPct >= 80 && (
+              <Box borderStyle="round"
+                borderColor={ctxPct >= 90 ? theme.status.error : theme.status.warning}
+                paddingX={2} marginX={1} marginBottom={1}>
+                <Text color={ctxPct >= 90 ? theme.status.error : theme.status.warning}>
+                  {ctxPct >= 90 ? `Context ${ctxPct}% full — /new now` : `Context ${ctxPct}% full — consider /new`}
+                </Text>
+              </Box>
+            )}
+
+            {/* Live: active tool */}
+            {activeTool && (
+              <Box marginLeft={2} marginTop={1} gap={1}>
+                <BrailleSpinner color={theme.status.running} />
+                <Text bold color={theme.syntax.keyword}>{activeTool.toolName}</Text>
+                {activeTool.argsSummary && <Text color={theme.text.dim}>({activeTool.argsSummary})</Text>}
+              </Box>
+            )}
+
+            {/* Live: streaming thinking */}
+            {isRunning && streamThinking && (
+              <Box marginLeft={2} marginTop={1} gap={1}>
+                <BrailleSpinner color={theme.status.running} />
+                <Text color={theme.text.dim}>
+                  {streamThinking.length > 160 ? '…' + streamThinking.slice(-160) : streamThinking}
+                </Text>
+              </Box>
+            )}
+
+            {/* Live: streaming response */}
+            {isRunning && !streamThinking && streamResponse && (
+              <Box marginLeft={2} marginTop={1} gap={1}>
+                <Text color={theme.role.assistant}>◆ </Text>
+                <Text color={theme.text.primary}>{streamResponse}</Text>
+              </Box>
+            )}
+
+            {/* Live: fallback spinner */}
+            {isThinking && !activeTool && !streamThinking && !streamResponse && (
+              <Box marginLeft={2} marginTop={1} gap={1}>
+                <BrailleSpinner color={theme.status.running} />
+                <Text color={theme.text.secondary}>
+                  {agentStatus === 'planning' ? 'Planning…' : 'Thinking…'}
+                </Text>
+              </Box>
+            )}
+
+            {/* Completed messages — reversed so newest sits at bottom */}
+            {[...completed].reverse().map(item => (
+              <ItemView key={item.id} item={item} />
+            ))}
+          </Box>
+
+          <Box height={1} />
+        </Box>
+
+        {/* Right: sidebar — always visible because in the fixed-height row */}
+        {useSidebar && (
+          <Box flexDirection="column" width={sideWidth} height={convH}>
+            <FilesPanel files={fileChanges} focused={focus === 'files'} height={filesH} />
+            <ToolsPanel tools={toolLog}     focused={focus === 'tools'} height={toolsH} />
+            <ContextPanel used={tokenUsage} total={contextWindow} focused={focus === 'ctx'} height={ctxH} />
+          </Box>
+        )}
       </Box>
 
-      {/* Help */}
-      {showHelp && (
-        <Box marginTop={1} paddingX={2} flexDirection="column">
-          <Text dimColor>
-            <Text bold>Commands: </Text>
-            <Text color={colors.brand}>run: task</Text> start agent
-            {' | '}
-            <Text bold>stop</Text> stop agent
-            {' | '}
-            <Text bold>clear</Text> clear
-            {' | '}
-            <Text bold>?</Text> toggle help
-          </Text>
-        </Box>
+      {/* ── Command palette — shrinks convH when visible ──────── */}
+      {showPalette && (
+        <CommandPalette
+          onSelect={cmd => { setInput(''); handleCommand(cmd); }}
+          onClose={() => setShowPalette(false)}
+        />
       )}
+
+      {/* ── Input bar — 3 rows ────────────────────────────────── */}
+      <Box height={3} borderStyle="round" borderColor={inputBorder} paddingX={2}>
+        <Text color={isRunning ? theme.status.running : theme.role.user}>{'> '}</Text>
+        <Box flexGrow={1}>
+          <TextInput
+            value={input}
+            onChange={setInput}
+            onSubmit={handleSubmit}
+            placeholder={inputPlaceholder}
+            focus={focus === 'input' && !showPalette}
+          />
+        </Box>
+        {input.length > 0 && (
+          <Text color={theme.text.dim}>{input.length}</Text>
+        )}
+      </Box>
+
+      {/* ── Footer — 1 row ────────────────────────────────────── */}
+      <Box height={1} paddingX={2}>
+        <Text color={theme.text.dim}>{footerHint}</Text>
+      </Box>
+
     </Box>
   );
 };

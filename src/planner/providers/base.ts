@@ -1,5 +1,3 @@
-import type { PlannerResponse } from '../../types/event.js'
-
 
 /**
  * Base inference that all the llm providers must implement 
@@ -9,17 +7,12 @@ import type { PlannerResponse } from '../../types/event.js'
  */
 
 export interface LLMProvider {
-  // provider name (mainly for logging)
   name: string;
-  
-  // call llm with a prompt and gert structures response 
-  call (prompt:string, options?:LLMCallOptions):Promise<LLMResponse>;
-  
-  // streaming call - yields deltas as they arrive
+  call(prompt: string, options?: LLMCallOptions): Promise<LLMResponse>;
   stream?(prompt: string, options?: LLMCallOptions): AsyncGenerator<LLMStreamDelta, void, unknown>;
-   
-  // check if provider is available 
   isAvailable(): Promise<boolean>;
+  // Returns the model's context window token limit (used for usage warnings)
+  getContextWindow(): Promise<number>;
 }
 
 //options for llm LLMCalls
@@ -27,7 +20,8 @@ export interface LLMCallOptions{
   temperature?: number;
   maxTokens?: number;
   systemPrompt?: string;
-  mode?: 'plan'|'act'|'finalize'; //the 3 modes planned right now 
+  mode?: 'plan'|'act'|'finalize';
+  timeout?: number; // ms — overrides provider default
 }
 
 // Raw response from llm 

@@ -20,6 +20,8 @@
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^25.2.3",
+    "@types/sharp": "^0.31.1",
+    "sharp": "^0.34.5",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"
   },
