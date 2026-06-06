@@ -1,4 +1,4 @@
-import type {Plan, Observation} from './agent.ts'
+import type {Plan, Observation} from './agent.js'
 
 
 // Events represent things that happen to the agent 
@@ -18,9 +18,9 @@ export type AgentEvent =
 
 // PlannerResponse is what the llm can respond to the agent runtime, in this we define what all the llm would respond to the runtime.
 
-export type PlannerResponse = 
-  | {type: 'plan'; steps: string[]; reasoning: string }
-  | {type: 'tool_call'; tool: string; args: Record<string, unknown>; requiresApproval: boolean}
+export type PlannerResponse =
+  | {type: 'plan'; steps: string[]; reasoning: string; estimatedToolCalls?: number}
+  | {type: 'tool_call'; tool: string; args: Record<string, unknown>; requiresApproval: boolean; reasoning?: string}
   | {type: 'answer'; content: string}
   | {type: 'need_info'; question: string};
 

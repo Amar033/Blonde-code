@@ -44,9 +44,10 @@ export class BashTool extends BaseTool {
       'npm', 'npx', 'yarn', 'pnpm', 'bun',
       // Build tools
       'cargo', 'go', 'make', 'cmake', 'gradle',
-      // Git (read-only mostly)
+      // Git
       'git status', 'git diff', 'git log', 'git branch', 'git show',
       'git stash', 'git stash pop', 'git fetch', 'git pull',
+      'git restore', 'git checkout', 'git reset', 'git add', 'git commit',
       // Reading/listing
       'ls', 'pwd', 'cat', 'head', 'tail', 'less', 'more',
       'find', 'grep', 'rg', 'fd', 'fzf',

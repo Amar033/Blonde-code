@@ -1,18 +1,19 @@
+import type { Plan } from '../../types/agent.js';
 
-export interface PlanningStrategy{
-  plan(input: string, context: Context): Promise<Plan>;
+export interface PlanningStrategy {
+  plan(input: string): Promise<Plan>;
 }
 
-// single call (Chain of thought)
+// Single LLM call — the approach currently wired into AgentRuntime via LLMClient.plan()
 export class ChainOfThoughtStrategy implements PlanningStrategy {
-  async plan(input: string): Promise<Plan>{
-    // one llm call, one plan
+  async plan(_input: string): Promise<Plan> {
+    throw new Error('ChainOfThoughtStrategy.plan() is a stub — planning goes through LLMClient directly');
   }
 }
 
-// multiple calls (Tree of thought) - great idea that i found when researched, dont plan on implementing it right now, but just food for though
+// Generate N plans, score them, return best — not yet implemented
 export class TreeOfThoughtStrategy implements PlanningStrategy {
-  async plan(input: string): Promise<Plan>{
-    // generate 3 plans, score and return the best
+  async plan(_input: string): Promise<Plan> {
+    throw new Error('TreeOfThoughtStrategy.plan() not yet implemented');
   }
 }

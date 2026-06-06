@@ -52,12 +52,12 @@ export class ListFilesTool extends BaseTool {
     try {
       const entries = await fs.readdir(path, {withFileTypes: true});
 
-      // Filter out noise
+      // Filter out heavy/irrelevant directories; keep dot-files (.env, .gitignore, etc.)
       const filtered = entries.filter(e =>
-        !e.name.startsWith('.') &&
         e.name !== 'node_modules' &&
         e.name !== 'dist' &&
-        e.name !== 'build'
+        e.name !== 'build' &&
+        e.name !== '.git'
       );
 
       // Separate files and directories

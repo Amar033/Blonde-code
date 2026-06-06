@@ -49,6 +49,7 @@ export abstract class BaseTool implements Tool{
   abstract description: string;
   abstract argsSchema: Tool['argsSchema'];
   abstract isDangerous: boolean;
+  abstract requiresApproval: boolean;
 
   abstract execute(args: unknown): Promise<ToolResult>;
   abstract fakeRun(args: unknown): Promise<FakeRunResult>;
