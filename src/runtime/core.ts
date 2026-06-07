@@ -616,6 +616,21 @@ export class AgentRuntime {
             yield obsEvent;
             this.emit(obsEvent);
 
+            // Emit sources from web_search so the UI can display citations
+            if (toolCall.name === 'web_search' && observation.success && observation.result) {
+              const rawResults = (observation.result as any)?.results;
+              if (Array.isArray(rawResults) && rawResults.length > 0) {
+                const sources = rawResults
+                  .filter((r: any) => r.url && r.title)
+                  .map((r: any) => ({ title: String(r.title), url: String(r.url) }));
+                if (sources.length > 0) {
+                  const sourcesEvent: AgentEvent = { type: 'sources_ready', sources };
+                  yield sourcesEvent;
+                  this.emit(sourcesEvent);
+                }
+              }
+            }
+
             // After any edit_file (success or failure), allow one verification read
             // by clearing that path from the duplicate-detection history.
             if (toolCall.name === 'edit_file') {
@@ -821,8 +836,9 @@ export class AgentRuntime {
 
       case 'web_search':
         if (result.success && result.output) {
-          const { resultsCount, results } = result.output;
-          summary = `Web search found ${resultsCount} results. Top: ${(results || []).slice(0, 3).map((r: any) => r.title).join(' | ')}`;
+          const { resultsCount, results, provider } = result.output;
+          const via = provider === 'searxng' ? 'SearXNG' : provider === 'duckduckgo' ? 'DuckDuckGo' : provider ?? 'unknown';
+          summary = `Web search via ${via} — ${resultsCount} results. Top: ${(results || []).slice(0, 3).map((r: any) => r.title).join(' | ')}`;
         } else {
           summary = `Web search failed: ${result.error}`;
         }

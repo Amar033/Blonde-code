@@ -4,7 +4,6 @@ import React from 'react';
 import { render } from 'ink';
 import { App } from './App.js';
 import { appendFileSync } from 'fs';
-
 const _LOG = '/tmp/blonde.log';
 const _fmt = (...args: any[]) =>
   args.map(a => a instanceof Error ? a.message : typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');

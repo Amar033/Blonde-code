@@ -3,16 +3,17 @@ import { Box } from 'ink';
 import { WelcomeScreen } from './screens/WelcomeScreen.js';
 import { UnifiedSession } from './screens/UnifiedSession.js';
 import { SessionsScreen } from './screens/SessionsScreen.js';
+import { StartupScreen } from './screens/StartupScreen.js';
 import type { Session } from '../sessions/session-manager.js';
 
-type Screen = 'welcome' | 'session' | 'sessions-list';
+type Screen = 'startup' | 'welcome' | 'session' | 'sessions-list';
 
 interface AppProps {
   mockMode?: boolean;
 }
 
 export const App: React.FC<AppProps> = ({ mockMode }) => {
-  const [screen,        setScreen]        = useState<Screen>(mockMode ? 'session' : 'welcome');
+  const [screen,        setScreen]        = useState<Screen>(mockMode ? 'session' : 'startup');
   const [initialTask,   setInitialTask]   = useState<string | undefined>(
     mockMode ? 'Build a FastAPI backend with SQLite database' : undefined
   );
@@ -38,6 +39,9 @@ export const App: React.FC<AppProps> = ({ mockMode }) => {
 
   return (
     <Box>
+      {screen === 'startup' && (
+        <StartupScreen onDone={() => setScreen('welcome')} />
+      )}
       {screen === 'welcome' && (
         <WelcomeScreen onStart={handleStart} onShowSessions={() => setScreen('sessions-list')} />
       )}

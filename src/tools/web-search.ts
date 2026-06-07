@@ -16,6 +16,12 @@ export class WebSearchTool extends BaseTool {
         description: 'Number of results to return (default: 5)',
         default: 5,
       },
+      category: {
+        type: 'string',
+        description: 'Search category: general, news, code, science (default: general, SearXNG only)',
+        enum: ['general', 'news', 'code', 'science'],
+        default: 'general',
+      },
     },
     required: ['query'],
   };
@@ -42,9 +48,10 @@ export class WebSearchTool extends BaseTool {
 
   async execute(args: unknown): Promise<ToolResult> {
     const startTime = Date.now();
-    const { query, numResults = 5 } = args as {
+    const { query, numResults = 5, category = 'general' } = args as {
       query: string;
       numResults?: number;
+      category?: string;
     };
 
     if (!query || query.trim().length < 2) {
@@ -55,6 +62,62 @@ export class WebSearchTool extends BaseTool {
       };
     }
 
+    const searxngUrl = process.env.SEARXNG_BASE_URL;
+    if (searxngUrl) {
+      return this.searchViaSearXNG(query, numResults, category, searxngUrl, startTime);
+    }
+    return this.searchViaDuckDuckGo(query, numResults, startTime);
+  }
+
+  private async searchViaSearXNG(
+    query: string,
+    numResults: number,
+    category: string,
+    baseUrl: string,
+    startTime: number
+  ): Promise<ToolResult> {
+    try {
+      const url = `${baseUrl}/search?q=${encodeURIComponent(query)}&format=json&categories=${category}`;
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), 15000);
+
+      const response = await fetch(url, {
+        headers: { 'Accept': 'application/json' },
+        signal: controller.signal,
+      });
+      clearTimeout(t);
+
+      if (!response.ok) {
+        console.warn(`[WebSearch] SearXNG returned ${response.status}, falling back to DDG`);
+        return this.searchViaDuckDuckGo(query, numResults, startTime);
+      }
+
+      const data = await response.json() as {
+        results?: Array<{ title: string; url: string; content?: string; score?: number; engines?: string[] }>;
+      };
+
+      const results = (data.results ?? []).slice(0, numResults).map(r => ({
+        title: r.title ?? '',
+        url:   r.url   ?? '',
+        snippet: r.content ?? '',
+      }));
+
+      return {
+        success: true,
+        output: { query, provider: 'searxng', resultsCount: results.length, results },
+        metadata: { duration: Date.now() - startTime },
+      };
+    } catch (error: any) {
+      console.warn(`[WebSearch] SearXNG error (${error.message}), falling back to DDG`);
+      return this.searchViaDuckDuckGo(query, numResults, startTime);
+    }
+  }
+
+  private async searchViaDuckDuckGo(
+    query: string,
+    numResults: number,
+    startTime: number
+  ): Promise<ToolResult> {
     try {
       const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}&kl=us-en`;
 
@@ -79,30 +142,19 @@ export class WebSearchTool extends BaseTool {
 
       const html = await response.text();
       const results = this.parseResults(html, numResults);
-
       const duration = Date.now() - startTime;
 
       return {
         success: true,
-        output: {
-          query,
-          resultsCount: results.length,
-          results,
-        },
-        metadata: {
-          duration,
-        },
+        output: { query, provider: 'duckduckgo', resultsCount: results.length, results },
+        metadata: { duration },
       };
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
       return {
         success: false,
         output: null,
         error: `Search failed: ${error.message}`,
-        metadata: {
-          duration,
-        },
+        metadata: { duration: Date.now() - startTime },
       };
     }
   }

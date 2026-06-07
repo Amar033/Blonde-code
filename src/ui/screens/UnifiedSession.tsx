@@ -24,9 +24,11 @@ interface ApprovalRequest {
   reasoning?: string;
 }
 
+type SearchSource = { title: string; url: string };
+
 type NewItem =
   | { kind: 'user';      text: string }
-  | { kind: 'assistant'; text: string }
+  | { kind: 'assistant'; text: string; sources?: SearchSource[] }
   | { kind: 'tool';      toolName: string; argsSummary: string; result: string; success: boolean; ms: number }
   | { kind: 'plan';      stepCount: number; first: string }
   | { kind: 'system';    text: string };
@@ -169,6 +171,7 @@ const ItemView = memo(({ item }: { item: CompletedItem }) => {
   }
 
   if (item.kind === 'assistant') {
+    const sources = item.sources ?? [];
     return (
       <Box flexDirection="column" marginTop={1}>
         <Box gap={1}>
@@ -178,6 +181,22 @@ const ItemView = memo(({ item }: { item: CompletedItem }) => {
         <Box marginLeft={2} flexDirection="column">
           <MarkdownBlock text={item.text} />
         </Box>
+        {sources.length > 0 && (
+          <Box flexDirection="column" marginLeft={2} marginTop={1}>
+            <Text color={theme.text.dim}>Sources</Text>
+            {sources.map((s, i) => {
+              const isLast = i === sources.length - 1;
+              const prefix = isLast ? '└' : '├';
+              const label = s.title.length > 50 ? s.title.slice(0, 49) + '…' : s.title;
+              return (
+                <Box key={i} gap={1}>
+                  <Text color={theme.text.dim}>{prefix} [{i + 1}]</Text>
+                  <Text color={theme.text.dim}>{label} — {s.url.slice(0, 60)}</Text>
+                </Box>
+              );
+            })}
+          </Box>
+        )}
       </Box>
     );
   }
@@ -263,6 +282,7 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
   const firstMessageRef     = useRef<string | null>(null);
   const historyToRestoreRef = useRef<Array<{role: 'user'|'assistant'; content: string}> | null>(null);
   const runningToolIdRef    = useRef<string | null>(null);
+  const pendingSourcesRef   = useRef<SearchSource[]>([]);
 
   const CWD = process.cwd().replace(os.homedir(), '~');
 
@@ -391,6 +411,8 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
     const mgr = sessionMgrRef.current;
     mgr?.addMessage('user', task);
 
+    pendingSourcesRef.current = [];
+
     try {
       const source = mockMode
         ? mockEventStream()
@@ -473,10 +495,16 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
           }
         }
 
+        if (event.type === 'sources_ready') {
+          pendingSourcesRef.current = [...pendingSourcesRef.current, ...event.sources];
+        }
+
         if (event.type === 'complete') {
           clearStream();
           setIsThinking(false);
-          push({ kind: 'assistant', text: event.finalResponse });
+          const sources = pendingSourcesRef.current.length > 0 ? [...pendingSourcesRef.current] : undefined;
+          pendingSourcesRef.current = [];
+          push({ kind: 'assistant', text: event.finalResponse, sources });
           setTurns(t => t + 1);
           mgr?.addMessage('assistant', event.finalResponse);
           if (!mockMode) {
