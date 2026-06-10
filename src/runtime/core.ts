@@ -10,6 +10,12 @@ import {ToolRegistry} from '../tools/registry.js'
 import type {Tool} from '../tools/base.js'
 import type {AgentConfig} from '../agent/agent'
 import {classifyIntent} from '../planner/intent-classifier.js'
+import {repoMapService} from '../services/repo-map.js'
+import {exec} from 'child_process'
+import {promisify} from 'util'
+import {extname} from 'path'
+
+const execAsync = promisify(exec);
 // runtime configuration (global configuration for the runtime to prevebnt infinite loops and max iterations)
 export interface RuntimeConfig{
   maxTurns: number;
@@ -51,7 +57,9 @@ export class AgentRuntime {
   private agentName: string = 'build';
   // Sliding conversation history — kept across run() calls so the LLM knows what was discussed
   private conversationHistory: ConversationTurn[] = [];
-  private readonly HISTORY_CHAR_LIMIT = 8000; // ~2k tokens, leaves headroom for plan/act prompts
+  // Dynamically computed once the context window is known — see getHistoryCharLimit()
+  private historyCharLimit = 8000;
+  private compacting = false; // prevents re-entrant compaction calls
 
 
   constructor(toolRegistry: ToolRegistry, config: Partial<RuntimeConfig> = {}){
@@ -97,7 +105,7 @@ export class AgentRuntime {
     this.conversationHistory = [...turns];
     // Apply the same sliding-window limit as pushHistory
     while (
-      this.conversationHistory.reduce((n, t) => n + t.content.length, 0) > this.HISTORY_CHAR_LIMIT &&
+      this.conversationHistory.reduce((n, t) => n + t.content.length, 0) > this.historyCharLimit &&
       this.conversationHistory.length > 2
     ) {
       this.conversationHistory.shift();
@@ -106,12 +114,58 @@ export class AgentRuntime {
 
   private pushHistory(role: 'user' | 'assistant', content: string): void {
     this.conversationHistory.push({ role, content });
-    // Trim oldest turns until total chars fit the window
-    while (
-      this.conversationHistory.reduce((n, t) => n + t.content.length, 0) > this.HISTORY_CHAR_LIMIT &&
-      this.conversationHistory.length > 2
+
+    const totalChars = () => this.conversationHistory.reduce((n, t) => n + t.content.length, 0);
+
+    // Compact early at 70% capacity when there are enough turns to summarise.
+    // This is much better than blindly dropping turns at 100%: the agent retains
+    // a coherent written summary of what it did rather than just losing context.
+    if (
+      this.llmClient &&
+      totalChars() > this.historyCharLimit * 0.70 &&
+      this.conversationHistory.length >= 4 &&
+      !this.compacting
     ) {
+      this.compactHistoryAsync();
+    }
+
+    // Hard fallback: if compaction hasn't finished yet and we're at the limit, just drop
+    while (totalChars() > this.historyCharLimit && this.conversationHistory.length > 2) {
       this.conversationHistory.shift();
+    }
+  }
+
+  // Summarise the oldest half of conversation history into a single synthetic turn.
+  // Runs asynchronously — the guard flag prevents multiple simultaneous compactions.
+  private async compactHistoryAsync(): Promise<void> {
+    if (!this.llmClient || this.compacting) return;
+    this.compacting = true;
+
+    try {
+      // Take the oldest half of turns to compact — keep the recent half intact
+      const cutoff  = Math.floor(this.conversationHistory.length / 2);
+      const toCompact = this.conversationHistory.slice(0, cutoff);
+      const toKeep    = this.conversationHistory.slice(cutoff);
+
+      const block = toCompact
+        .map(t => `${t.role === 'user' ? 'User' : 'Assistant'}: ${t.content}`)
+        .join('\n');
+
+      const res = await this.llmClient['provider'].call(
+        `Summarise this conversation history in 2-4 sentences. Focus on what files were edited, what tools were called, what errors were found, and what was accomplished. Be specific about file names and outcomes.\n\n${block}`,
+        { mode: 'plan', maxTokens: 300, temperature: 0.3 }
+      );
+
+      const summary: ConversationTurn = {
+        role: 'assistant',
+        content: `[Earlier in this session: ${res.content.trim()}]`,
+      };
+
+      this.conversationHistory = [summary, ...toKeep];
+    } catch {
+      // Non-fatal — history will just hard-trim on the next pushHistory call
+    } finally {
+      this.compacting = false;
     }
   }
 
@@ -151,10 +205,23 @@ export class AgentRuntime {
   }
 
   async initialize(): Promise<void> {
-    // Get the agent configuration
     const { getAgent } = await import('../agent/agent');
-    const agentConfig = await getAgent(this.agentName);
-    this.llmClient = await LLMClient.fromEnv(agentConfig);
+    const agentConfig  = await getAgent(this.agentName);
+    this.llmClient     = await LLMClient.fromEnv(agentConfig);
+
+    // Set history budget based on the real context window:
+    // reserve 30% for the active prompt (tools + repo map + plan + observations)
+    // 1 token ≈ 3 chars of mixed prose+code
+    this.llmClient.getContextWindow().then(ctxTokens => {
+      const historyTokens  = Math.floor(ctxTokens * 0.70);
+      this.historyCharLimit = historyTokens * 3;
+    }).catch(() => { /* keep default 8000 */ });
+
+    // Build repo map in background — inject into LLMClient once ready
+    const root = process.cwd();
+    repoMapService.build(root).then(() => {
+      this.llmClient?.setRepoMap(repoMapService.getFormatted());
+    }).catch(() => { /* non-fatal */ });
   }
 
   // Stream LLM response and yield events for each token
@@ -475,9 +542,19 @@ export class AgentRuntime {
 
       const availableTools = contextTools;
 
-      const observationSummaries= observations.map(o=>o.summary);
+      const observationSummaries = observations.map(o => o.summary);
+
+      // Inject targeted directives for actionable observation kinds.
+      // These sit at the end of the summaries list so the LLM sees them right before it acts.
+      const latestObs = observations[observations.length - 1];
+      if (latestObs?.kind === 'type_error') {
+        observationSummaries.push('⚠️ DIRECTIVE: Fix ALL TypeScript errors listed above before writing any other files or calling any other tools. Do not proceed until tsc is clean.');
+      } else if (latestObs?.kind === 'test_failure') {
+        observationSummaries.push('⚠️ DIRECTIVE: Fix the failing tests above. Do not call any other tools until all tests pass.');
+      }
+
       const toolCallHistorySummary = this.getToolCallSummary();
-      
+
       // Force synthesis if we have too many observations
       const forceSynthesis = observations.length >= 8;
 
@@ -641,6 +718,29 @@ export class AgentRuntime {
                 );
               }
             }
+
+            // Invalidate repo map for any file that was written or edited
+            if (toolCall.name === 'write_file' || toolCall.name === 'edit_file') {
+              const p = toolCall.args.path as string | undefined;
+              if (p && observation?.success) {
+                const root = process.cwd();
+                repoMapService.invalidate(p, root).then(() => {
+                  this.llmClient?.setRepoMap(repoMapService.getFormatted());
+                }).catch(() => {});
+
+                // Run tsc after every successful TypeScript edit.
+                // If there are errors, push them as a new observation so the agent
+                // sees them immediately and can self-correct in the next loop turn.
+                const diagText = await this.runTypeDiagnostics(p);
+                if (diagText) {
+                  const diagObs = this.createErrorObservation(toolCall.name, toolCall.args, `⚠️ ${diagText}`, 'type_error');
+                  observations.push(diagObs);
+                  const diagEvent: AgentEvent = { type: 'observation_ready', observation: diagObs };
+                  yield diagEvent;
+                  this.emit(diagEvent);
+                }
+              }
+            }
           }
 
           loopCount++;
@@ -667,7 +767,34 @@ export class AgentRuntime {
     }
   }
 
-  // execute tool with validation 
+  // Run tsc --noEmit after a TypeScript file is written/edited.
+  // Returns null if clean, or the error text if there are type errors.
+  // This is what closes the write→verify loop — the agent sees errors as observations
+  // and can fix them before it ever returns a final answer.
+  private async runTypeDiagnostics(filePath: string): Promise<string | null> {
+    const ext = extname(filePath).toLowerCase();
+    if (ext !== '.ts' && ext !== '.tsx') return null;
+
+    try {
+      await execAsync('npx tsc --noEmit 2>&1', {
+        cwd: process.cwd(),
+        timeout: 20_000,
+      });
+      return null; // clean
+    } catch (e: any) {
+      // tsc exits non-zero when there are errors — that's expected, not a crash
+      const raw: string = e.stdout ?? e.message ?? '';
+      // Cap output — no need to flood the agent with 500 lines
+      const lines = raw.trim().split('\n').filter(Boolean);
+      const errors = lines.filter(l => l.includes(': error TS'));
+      if (errors.length === 0) return null; // warnings only, not errors
+      const capped = errors.slice(0, 15).join('\n');
+      const tail   = errors.length > 15 ? `\n(+${errors.length - 15} more errors)` : '';
+      return `TypeScript errors after editing ${filePath}:\n${capped}${tail}`;
+    }
+  }
+
+  // execute tool with validation
   private async executeToolCall(
     toolCall: ToolCall,
     plan: Plan,
@@ -828,7 +955,15 @@ export class AgentRuntime {
       case 'web_fetch':
         if (result.success && result.output) {
           const { statusCode, contentLength, content } = result.output;
-          summary = `Fetched ${input.url}: HTTP ${statusCode}, ${contentLength} chars. Content preview: ${(content || '').slice(0, 200)}...`;
+          // Strip markdown links and collapse whitespace so the preview is a clean single line
+          const rawPreview = (content || '') as string;
+          const preview = rawPreview
+            .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+            .replace(/[#*`_>]/g, '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, 120);
+          summary = `Fetched ${input.url}: HTTP ${statusCode}, ${contentLength} chars. ${preview}…`;
         } else {
           summary = `Web fetch failed: ${result.error}`;
         }
@@ -857,7 +992,6 @@ export class AgentRuntime {
         if (result.success && result.output) {
           const { diff, path: diffPath } = result.output as { diff: string; path: string };
           const { additions = 0, deletions = 0 } = result.metadata ?? {};
-          // Include the full patch header + all changed lines (up to 40 lines displayed)
           const diffLines = diff.split('\n');
           const preview = diffLines
             .filter((l: string) => l.startsWith('@@') || l.startsWith('+') || l.startsWith('-') || l.startsWith(' '))
@@ -866,6 +1000,65 @@ export class AgentRuntime {
           summary = `Git diff (${diffPath}): +${additions} -${deletions} lines.\n${preview}`;
         } else {
           summary = `git_diff failed: ${result.error}`;
+        }
+        break;
+
+      case 'git_log':
+        if (result.success && result.output) {
+          const { commits } = result.output as { commits: Array<{ hash: string; message: string }> };
+          summary = `Git log — ${commits.length} commits:\n${commits.map(c => `  ${c.hash} ${c.message}`).join('\n')}`;
+        } else {
+          summary = `git_log failed: ${result.error}`;
+        }
+        break;
+
+      case 'git_add':
+        summary = result.success
+          ? `Staged: ${(result.output as any)?.paths}. Staged files: ${((result.output as any)?.staged ?? []).join(', ')}`
+          : `git_add failed: ${result.error}`;
+        break;
+
+      case 'git_commit':
+        summary = result.success
+          ? `Committed: "${(result.output as any)?.message}" (${(result.output as any)?.hash})`
+          : `git_commit failed: ${result.error}`;
+        break;
+
+      case 'git_branch':
+        if (result.success && result.output) {
+          const out = result.output as any;
+          summary = out.branches
+            ? `Branches: ${out.branches.join(', ')} (current: ${out.current})`
+            : out.message ?? 'Branch operation done';
+        } else {
+          summary = `git_branch failed: ${result.error}`;
+        }
+        break;
+
+      case 'git_stash':
+        summary = result.success
+          ? `Stash ${(result.output as any)?.action}: ${(result.output as any)?.message ?? 'done'}`
+          : `git_stash failed: ${result.error}`;
+        break;
+
+      case 'delete_file':
+        summary = result.success
+          ? `Deleted: ${(result.output as any)?.path}`
+          : `delete_file failed: ${result.error}`;
+        break;
+
+      case 'rename_file':
+        summary = result.success
+          ? `Moved: ${(result.output as any)?.from} → ${(result.output as any)?.to}`
+          : `rename_file failed: ${result.error}`;
+        break;
+
+      case 'search_codebase':
+        if (result.success && result.output) {
+          const { query, matchCount, formatted } = result.output as any;
+          summary = `Codebase search "${query}" — ${matchCount} match(es):\n${formatted ?? ''}`;
+        } else {
+          summary = `search_codebase failed: ${result.error}`;
         }
         break;
 
@@ -894,6 +1087,7 @@ export class AgentRuntime {
         }
     }
 
+    const kind = this.kindForTool(toolName, result.success);
     return {
       toolName,
       input,
@@ -901,14 +1095,26 @@ export class AgentRuntime {
       summary,
       timestamp: new Date(),
       success: result.success,
+      kind,
     };
+  }
+
+  private kindForTool(toolName: string, success: boolean): import('../types/agent.js').ObservationKind {
+    if (!success) return 'error';
+    if (['read_file', 'list_files', 'file_tree', 'glob', 'grep'].includes(toolName)) return 'file_read';
+    if (['write_file', 'edit_file', 'replace_block', 'delete_file', 'rename_file'].includes(toolName)) return 'file_write';
+    if (toolName === 'bash') return 'shell_output';
+    if (['web_search', 'web_fetch', 'search_codebase'].includes(toolName)) return 'search_result';
+    if (toolName.startsWith('git_')) return 'git_result';
+    return 'shell_output';
   }
 
   // Create error observations
   private createErrorObservation(
     toolName: string,
     input: Record<string,unknown>,
-    error: string
+    error: string,
+    kind: import('../types/agent.js').ObservationKind = 'error'
   ): Observation {
     return {
       toolName,
@@ -917,6 +1123,7 @@ export class AgentRuntime {
       summary: `Error: ${error}`,
       timestamp: new Date(),
       success: false,
+      kind,
     };
   }
 

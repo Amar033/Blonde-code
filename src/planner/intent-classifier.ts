@@ -11,7 +11,7 @@ const RULES: Rule[] = [
   // Git operations — checked first so "show diff" doesn't fall into file-read
   {
     pattern: /\b(git|diff|commit|push|pull|branch|merge|rebase|stash|log|status|staged|unstaged|changed files)\b/i,
-    tools: ['read_file', 'list_files', 'git_status', 'git_diff', 'bash'],
+    tools: ['read_file', 'list_files', 'git_status', 'git_diff', 'git_log', 'git_add', 'git_commit', 'git_branch', 'git_stash', 'bash'],
   },
   // Web research — explicit "online/web/url/http" required to avoid matching "search in files"
   {
@@ -33,10 +33,15 @@ const RULES: Rule[] = [
     pattern: /\b(list files?|ls|tree|directory|folder|structure|what files|show files?)\b/i,
     tools: ['list_files', 'file_tree', 'glob', 'read_file'],
   },
-  // File editing / creation
+  // File editing / creation / refactoring
   {
-    pattern: /\b(edit|modify|change|update|fix|add|remove|delete|replace|rename|rewrite|refactor|create|write|append|insert|patch)\b/i,
-    tools: ['read_file', 'write_file', 'edit_file', 'list_files', 'git_diff'],
+    pattern: /\b(edit|modify|change|update|fix|add|remove|replace|rewrite|create|write|append|insert|patch)\b/i,
+    tools: ['read_file', 'write_file', 'edit_file', 'list_files', 'git_diff', 'search_codebase'],
+  },
+  // File delete / rename / move
+  {
+    pattern: /\b(delete|remove|rename|move|mv|refactor)\b/i,
+    tools: ['read_file', 'list_files', 'delete_file', 'rename_file', 'search_codebase', 'git_status'],
   },
   // File reading / display
   {

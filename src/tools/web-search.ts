@@ -13,8 +13,8 @@ export class WebSearchTool extends BaseTool {
       },
       numResults: {
         type: 'number',
-        description: 'Number of results to return (default: 5)',
-        default: 5,
+        description: 'Number of results to return (default: 8)',
+        default: 8,
       },
       category: {
         type: 'string',
@@ -48,7 +48,7 @@ export class WebSearchTool extends BaseTool {
 
   async execute(args: unknown): Promise<ToolResult> {
     const startTime = Date.now();
-    const { query, numResults = 5, category = 'general' } = args as {
+    const { query, numResults = 8, category = 'general' } = args as {
       query: string;
       numResults?: number;
       category?: string;

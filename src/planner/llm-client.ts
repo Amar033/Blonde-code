@@ -29,6 +29,7 @@ import type {AgentConfig} from '../agent/agent';
 export class LLMClient {
   private provider: LLMProvider;
   private agentConfig?: AgentConfig;
+  private repoMap: string = '';
   // Tracks the prompt token count of the most recent LLM call.
   // We use the latest prompt_eval_count (not a running sum) because each act() call
   // re-sends the entire observation history — so the latest value reflects true context usage.
@@ -38,6 +39,10 @@ export class LLMClient {
   constructor(provider: LLMProvider, agentConfig?: AgentConfig) {
     this.provider = provider;
     this.agentConfig = agentConfig;
+  }
+
+  setRepoMap(map: string): void {
+    this.repoMap = map;
   }
 
   getTokenUsage(): number {
@@ -153,12 +158,17 @@ export class LLMClient {
     return `PREVIOUS CONVERSATION (use this to understand references like "that", "it", "again"):\n${lines}\n\n`;
   }
 
+  private buildRepoMapSection(): string {
+    if (!this.repoMap) return '';
+    return `CODEBASE MAP (use this to locate files and symbols — no need to search blindly):\n${this.repoMap}\n\n`;
+  }
+
   private buildPlanPrompt(input: string, history: ConversationTurn[] = []): { prompt: string; systemPrompt: string } {
     return {
       systemPrompt: this.buildSystemPrompt(
         'You are a strategic planning assistant. Analyze the user request and create a high-level plan. Always respond in valid JSON format.'
       ),
-      prompt: `${this.buildHistorySection(history)}Create a step-by-step plan for this task. Make autonomous decisions — do NOT ask the user for clarification.
+      prompt: `${this.buildRepoMapSection()}${this.buildHistorySection(history)}Create a step-by-step plan for this task. Make autonomous decisions — do NOT ask the user for clarification.
 
 UserRequest: ${input}
 
@@ -244,11 +254,12 @@ Respond ONLY with this JSON (no markdown fences, no extra text):
       ? `\n⚠️ CRITICAL: You have gathered ${observations.length} observations! STOP calling tools and provide your final answer now.\n` : '';
 
     const historySection = this.buildHistorySection(history);
+    const repoMapSection = this.buildRepoMapSection();
     const prompt = `You are executing a plan to help the user. You have access to these tools:
 
 ${toolDescriptions}
 
-${historySection}USER REQUEST: ${userInput || 'Not provided'}
+${repoMapSection}${historySection}USER REQUEST: ${userInput || 'Not provided'}
 
 CURRENT PLAN:
 ${plan}
@@ -261,6 +272,8 @@ YOUR JOB:
 - Execute the plan step by step using the available tools
 - After each tool result, analyze the result and decide what to do next
 - If you have the answer to the user's request, respond with {"type": "answer", "content": "your answer"}
+  - For research/analysis tasks: write a comprehensive, well-structured markdown response with clear sections, key findings, and conclusions. Don't truncate or summarize — give the full detailed answer.
+  - For coding tasks: include the relevant code, explanation, and any caveats.
 - If you need more info, respond with {"type": "need_info", "question": "what you need"}
 - Otherwise, call another tool or continue with the plan
 
@@ -272,7 +285,7 @@ Respond with ONE of these formats:
 CRITICAL RULES:
 1. Analyze each tool result before calling the next tool — never re-read a file you already read.
 2. EDITING an existing file: use edit_file (find exact text → replace). Do NOT use write_file unless creating a brand-new file.
-3. edit_file requires a non-empty "find" string — the exact text that currently exists in the file. Always read the file first, then copy a unique snippet as "find".
+3. edit_file requires a non-empty "find" string — the exact text that currently exists in the file. Always read the file first, then copy a unique snippet as "find". If the snippet might not be unique or indentation is uncertain, use replace_block instead — it's more tolerant.
 4. When the user says "add a space", "add a line", "change a word" — read the file once, then call edit_file immediately.
 5. When asked to "choose any file" or given a vague instruction: make the choice yourself, do NOT ask.
 6. {"type":"need_info"} is BANNED for choices you can make autonomously. Only use it when the user must supply something you literally cannot guess (e.g. a password or API key).
@@ -297,7 +310,7 @@ ${forceSynthesis ? '10. STOP NOW — provide your final answer immediately.' : '
     const response = await this.provider.call(prompt, {
       mode: 'act', systemPrompt,
       temperature: this.getTemperature('act'),
-      maxTokens: 1000,
+      maxTokens: 3000,
     });
     this.trackUsage(response);
     return this.parseResponse(response.content);
@@ -309,7 +322,7 @@ ${forceSynthesis ? '10. STOP NOW — provide your final answer immediately.' : '
     userInput?: string, toolCallHistory?: string, forceSynthesis?: boolean, history: ConversationTurn[] = []
   ): AsyncGenerator<StreamChunk> {
     const { prompt, systemPrompt } = this.buildActPrompt(plan, observations, availableTools, userInput, toolCallHistory, forceSynthesis, history);
-    const opts: LLMCallOptions = { mode: 'act', systemPrompt, temperature: this.getTemperature('act'), maxTokens: 1000 };
+    const opts: LLMCallOptions = { mode: 'act', systemPrompt, temperature: this.getTemperature('act'), maxTokens: 3000 };
 
     if (!this.supportsStreaming()) {
       const res = await this.provider.call(prompt, opts);

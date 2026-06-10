@@ -148,8 +148,11 @@ const ItemView = memo(({ item }: { item: CompletedItem }) => {
     const icon  = item.success ? '◆' : '✗';
     const ic    = item.success ? theme.status.success : theme.status.error;
     const rc    = item.success ? theme.text.secondary : theme.status.error;
-    const lines = item.result.slice(0, 360).split('\n');
-    const trunc = item.result.length > 360;
+    const MAX_LINE = 74;
+    const MAX_ROWS = 3;
+    const rawLines = item.result.split('\n').filter(l => l.trim());
+    const lines    = rawLines.slice(0, MAX_ROWS).map(l => l.slice(0, MAX_LINE));
+    const trunc    = rawLines.length > MAX_ROWS || item.result.length > MAX_LINE * MAX_ROWS;
     return (
       <Box flexDirection="column" marginLeft={2} marginTop={1}>
         <Box gap={1}>
