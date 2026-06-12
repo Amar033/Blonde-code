@@ -25,6 +25,7 @@ import {OpenRouterProvider} from './providers/openrouter.js';
 import {OllamaProvider, findOllamaModelsDirs} from './providers/ollama.js';
 import {Tool} from '../tools/base.js';
 import type {AgentConfig} from '../agent/agent';
+import {providerRegistry} from './provider-registry.js';
 
 export class LLMClient {
   private provider: LLMProvider;
@@ -63,6 +64,13 @@ export class LLMClient {
   }
 
   static async fromEnv(agentConfig?: AgentConfig): Promise<LLMClient> {
+    // Registry takes precedence over env vars — lets users configure providers from the terminal
+    const active = await providerRegistry.getActive();
+    if (active) {
+      const provider = providerRegistry.createProviderInstance(active);
+      return new LLMClient(provider, agentConfig);
+    }
+
     const providerName = process.env.LLM_PROVIDER || 'ollama';
     const apikey = process.env.OPENROUTER_API_KEY;
     const model = process.env.LLM_MODEL || 'qwen3.5:latest';

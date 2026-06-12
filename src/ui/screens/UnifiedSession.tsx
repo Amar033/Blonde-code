@@ -14,6 +14,7 @@ import { CommandPalette } from '../components/CommandPalette.js';
 import { AppHeader } from '../components/AppHeader.js';
 import { mockEventStream } from '../mock/eventStream.js';
 import type { Plan, Observation } from '../../types/agent.js';
+import { providerRegistry, parseProviderAdd } from '../../planner/provider-registry.js';
 import os from 'os';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -592,6 +593,79 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
       push({ kind: 'system', text: `Theme set to ${mode}` });
       return;
     }
+
+    // ── /provider commands ─────────────────────────────────────────────────────
+    if (val === '/provider' || val === '/providers') {
+      providerRegistry.list().then(list => {
+        if (list.length === 0) {
+          push({ kind: 'system', text: 'No providers configured. Use /provider add <name> <type> <apiKey> [model] [baseURL]' });
+          return;
+        }
+        const lines = list.map(p => {
+          const marker = p.isActive ? '* ' : '  ';
+          const key    = p.apiKey ? `key=***${p.apiKey.slice(-4)}` : 'no key';
+          return `${marker}${p.name}  [${p.type}]  model=${p.model}  ${key}`;
+        }).join('\n');
+        push({ kind: 'system', text: `Configured providers (* = active):\n${lines}` });
+      }).catch(err => push({ kind: 'system', text: `Error: ${err}` }));
+      return;
+    }
+    if (val.startsWith('/provider add ')) {
+      const parts  = val.slice('/provider add '.length).trim().split(/\s+/);
+      const result = parseProviderAdd(parts);
+      if (typeof result === 'string') {
+        push({ kind: 'system', text: result });
+        return;
+      }
+      providerRegistry.add(result).then(() => {
+        push({ kind: 'system', text: `Provider "${result.name}" added (${result.type} · ${result.model}). Use /provider use ${result.name} to activate.` });
+      }).catch(err => push({ kind: 'system', text: `Failed to save provider: ${err}` }));
+      return;
+    }
+    if (val.startsWith('/provider use ')) {
+      const name = val.slice('/provider use '.length).trim();
+      providerRegistry.setActive(name).then(ok => {
+        if (!ok) { push({ kind: 'system', text: `Unknown provider "${name}". Run /provider to list.` }); return; }
+        // Reset runtime so the next run picks up the new provider
+        runtimeRef.current      = null;
+        initPromiseRef.current  = null;
+        push({ kind: 'system', text: `Switched to provider "${name}". Next message will use it.` });
+      }).catch(err => push({ kind: 'system', text: `Error: ${err}` }));
+      return;
+    }
+    if (val.startsWith('/provider remove ')) {
+      const name = val.slice('/provider remove '.length).trim();
+      providerRegistry.remove(name).then(ok => {
+        if (!ok) { push({ kind: 'system', text: `Unknown provider "${name}".` }); return; }
+        // If this was the active provider, reset the runtime too
+        runtimeRef.current     = null;
+        initPromiseRef.current = null;
+        push({ kind: 'system', text: `Provider "${name}" removed.` });
+      }).catch(err => push({ kind: 'system', text: `Error: ${err}` }));
+      return;
+    }
+    if (val === '/provider clear' || val === '/provider reset') {
+      providerRegistry.clearActive().then(() => {
+        runtimeRef.current     = null;
+        initPromiseRef.current = null;
+        push({ kind: 'system', text: 'Active provider cleared — falling back to .env settings.' });
+      }).catch(err => push({ kind: 'system', text: `Error: ${err}` }));
+      return;
+    }
+    if (val === '/provider help') {
+      push({ kind: 'system', text: [
+        '/provider              — list all configured providers',
+        '/provider add <name> <type> <key> [model] [baseURL]',
+        '  types: openai · anthropic · openrouter · openai-compatible · ollama',
+        '  e.g. /provider add gpt openai sk-abc123 gpt-4o-mini',
+        '  e.g. /provider add claude anthropic sk-ant-xxx claude-haiku-4-5-20251001',
+        '  e.g. /provider add local openai-compatible - llama3 http://localhost:8080/v1',
+        '/provider use <name>   — switch active provider',
+        '/provider remove <name>— delete a provider',
+        '/provider clear        — revert to .env settings',
+      ].join('\n') });
+      return;
+    }
     if (isRunning) return;
     runTask(val);
   }, [isRunning, clearAll, push, onShowSessions, currentModel, initRuntime, runTask]);
@@ -753,6 +827,8 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
                 <Text color={theme.text.dim}>/new           · fresh session</Text>
                 <Text color={theme.text.dim}>/sessions      · browse sessions</Text>
                 <Text color={theme.text.dim}>/model [name]  · list / switch model</Text>
+                <Text color={theme.text.dim}>/provider      · list / add / switch providers</Text>
+                <Text color={theme.text.dim}>/provider help · provider command reference</Text>
                 <Text color={theme.text.dim}>/theme [mode]  · dark / light / dark-ansi</Text>
                 <Text color={theme.text.dim}>Ctrl+K         · command palette</Text>
                 <Text color={theme.text.dim}>Tab            · cycle panel focus</Text>

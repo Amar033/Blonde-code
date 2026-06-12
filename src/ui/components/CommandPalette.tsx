@@ -4,13 +4,15 @@ import TextInput from 'ink-text-input';
 import { theme } from '../theme.js';
 
 const COMMANDS = [
-  { name: '/clear',    desc: 'Clear conversation history' },
-  { name: '/new',      desc: 'Start a fresh session' },
-  { name: '/sessions', desc: 'Browse previous sessions' },
-  { name: '/model',    desc: 'List or switch models' },
-  { name: '/theme',    desc: 'Switch theme (dark/light/dark-ansi)' },
-  { name: 'stop',      desc: 'Interrupt the running agent' },
-  { name: '?',         desc: 'Toggle help panel' },
+  { name: '/clear',         desc: 'Clear conversation history' },
+  { name: '/new',           desc: 'Start a fresh session' },
+  { name: '/sessions',      desc: 'Browse previous sessions' },
+  { name: '/model',         desc: 'List or switch models' },
+  { name: '/provider',      desc: 'List / add / switch LLM providers' },
+  { name: '/provider help', desc: 'Show provider command reference' },
+  { name: '/theme',         desc: 'Switch theme (dark/light/dark-ansi)' },
+  { name: 'stop',           desc: 'Interrupt the running agent' },
+  { name: '?',              desc: 'Toggle help panel' },
 ];
 
 interface CommandPaletteProps {
