@@ -5,8 +5,8 @@ import { execSync } from 'child_process';
 import { SessionManager, type Session } from '../../sessions/session-manager.js';
 import { AppHeader } from '../components/AppHeader.js';
 import { BrandMark, LOGO_OPTIONS } from '../components/BrandMark.js';
-
-const PROVIDER = process.env.LLM_PROVIDER || 'ollama';
+import { providerRegistry } from '../../planner/provider-registry.js';
+import { loadUiConfig, saveUiConfig } from '../../services/ui-config.js';
 
 function getGitBranch(): string | null {
   try {
@@ -29,17 +29,30 @@ function fmtDate(iso: string): string {
 }
 
 interface WelcomeScreenProps {
-  onStart: (task: string) => void;
+  columns:        number;
+  rows:           number;
+  onStart:        (task: string) => void;
   onShowSessions: () => void;
+  onShowSettings: () => void;
 }
 
-export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onShowSessions }) => {
-  const [task,      setTask]      = useState('');
-  const [statusMsg, setStatusMsg] = useState('');
-  const [model,     setModel]     = useState(process.env.LLM_MODEL || 'qwen3.5:latest');
-  const [recent,    setRecent]    = useState<Session[]>([]);
-  const [gitBranch]               = useState<string | null>(getGitBranch);
-  const [logoIndex, setLogoIndex] = useState<number | undefined>(undefined);
+export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
+  columns,
+  rows,
+  onStart,
+  onShowSessions,
+  onShowSettings,
+}) => {
+  const [task,           setTask]           = useState('');
+  const [statusMsg,      setStatusMsg]      = useState('');
+  const [model,          setModel]          = useState(process.env.LLM_MODEL || 'qwen3.5:latest');
+  const [provider,       setProvider]       = useState(process.env.LLM_PROVIDER || 'ollama');
+  const [recent,         setRecent]         = useState<Session[]>([]);
+  const [gitBranch]                         = useState<string | null>(getGitBranch);
+  const [logoIndex,      setLogoIndex]      = useState<number | undefined>(undefined);
+  const [bannerOverride, setBannerOverride] = useState<string | undefined>(undefined);
+
+  const bannerWidth = 32;
 
   useEffect(() => {
     const mgr = new SessionManager();
@@ -47,6 +60,19 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onShowSes
       .then(() => mgr.loadAll())
       .then(sessions => setRecent(sessions.slice(0, 5)))
       .catch(() => {});
+
+    // Load persisted banner
+    loadUiConfig().then(cfg => {
+      if (cfg.banner) setBannerOverride(cfg.banner);
+    }).catch(() => {});
+
+    // Reflect active registry provider on mount
+    providerRegistry.getActive().then(active => {
+      if (active) {
+        setProvider(`${active.type}:${active.name}`);
+        setModel(active.model);
+      }
+    }).catch(() => {});
   }, []);
 
   const handleSubmit = () => {
@@ -55,6 +81,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onShowSes
     setTask('');
 
     if (v === '/sessions' || v === 'sessions') { onShowSessions(); return; }
+    if (v === '/settings' || v === 'settings') { onShowSettings(); return; }
 
     if (v === '/model' || v === '/models') {
       import('../../planner/providers/ollama.js').then(async ({ OllamaProvider, findOllamaModelsDirs }: any) => {
@@ -67,7 +94,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onShowSes
           `dir: ${modelsDir}`,
           '/model <name> to switch',
         ].join('  ·  '));
-      }).catch(() => setStatusMsg(`current: ${model} (${PROVIDER})`));
+      }).catch(() => setStatusMsg(`current: ${model} (${provider})`));
       return;
     }
 
@@ -92,9 +119,77 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onShowSes
       const opt = LOGO_OPTIONS.find(o => o.index === n);
       if (opt) {
         setLogoIndex(n);
+        setBannerOverride(undefined);
         setStatusMsg(`logo set to ${n} (${opt.label})`);
       } else {
         setStatusMsg(`unknown logo — try /logo 1, /logo 2, or /logo 3`);
+      }
+      return;
+    }
+
+    if (v === '/banner') {
+      setStatusMsg('usage: /banner <path>  (supports .png .jpg .gif — ~/... paths ok)  ·  /banner clear to reset');
+      return;
+    }
+
+    if (v === '/banner clear' || v === '/banner reset') {
+      setBannerOverride(undefined);
+      setLogoIndex(undefined);
+      saveUiConfig({ banner: undefined }).catch(() => {});
+      setStatusMsg('banner reset to default');
+      return;
+    }
+
+    if (v.startsWith('/banner ')) {
+      const p = v.slice(8).trim();
+      if (p) {
+        import('fs').then(({ default: fs }) => {
+          const resolved = p.replace(/^~/, process.env.HOME ?? '');
+          if (fs.existsSync(resolved)) {
+            setBannerOverride(resolved);
+            setLogoIndex(undefined);
+            saveUiConfig({ banner: resolved }).catch(() => {});
+            setStatusMsg(`banner set to ${p} (saved)`);
+          } else {
+            setStatusMsg(`file not found: ${p}`);
+          }
+        });
+      }
+      return;
+    }
+
+    if (v === '/provider' || v === '/providers') {
+      providerRegistry.list().then(providers => {
+        if (providers.length === 0) {
+          setStatusMsg('no providers registered — add one with: /provider add <name> <type> <apiKey|-> [model]');
+        } else {
+          const parts = providers.map(p =>
+            `${p.isActive ? '✓ ' : ''}${p.name} (${p.type}) ${p.model}`
+          );
+          setStatusMsg(parts.join('  ·  ') + '  ·  /provider <name> to switch');
+        }
+      }).catch(() => setStatusMsg('could not load providers'));
+      return;
+    }
+
+    if (v.startsWith('/provider ')) {
+      const name = v.slice(10).trim();
+      if (name) {
+        providerRegistry.setActive(name).then(ok => {
+          if (!ok) {
+            setStatusMsg(`provider "${name}" not found — use /provider to list registered providers`);
+          } else {
+            providerRegistry.get(name).then(entry => {
+              if (entry) {
+                setProvider(`${entry.type}:${entry.name}`);
+                setModel(entry.model);
+                process.env.LLM_PROVIDER = entry.type;
+                process.env.LLM_MODEL    = entry.model;
+                setStatusMsg(`switched to provider "${name}" (${entry.type}) — applies to next session`);
+              }
+            }).catch(() => {});
+          }
+        }).catch(() => setStatusMsg('failed to switch provider'));
       }
       return;
     }
@@ -103,26 +198,24 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onShowSes
   };
 
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" width={columns} height={rows}>
 
-      {/* ── Shared header — same as session screen ───────────── */}
-      <AppHeader model={model} provider={PROVIDER} branch={gitBranch} />
+      {/* ── Header ───────────────────────────────────────────── */}
+      <AppHeader model={model} provider={provider} branch={gitBranch} />
 
-      {/* ── Body: brand left | content right ─────────────────── */}
+      {/* ── Body: fills all remaining vertical space ─────────── */}
       <Box
         flexDirection="row"
+        flexGrow={1}
         borderStyle="single"
         borderColor="#2a2a2a"
-        paddingX={2}
-        paddingY={1}
-        gap={4}
+        overflow="hidden"
       >
+        {/* Left: banner */}
+        <BrandMark width={bannerWidth} logoIndex={logoIndex} bannerOverride={bannerOverride} />
 
-        {/* Left: brand mark (image or wordmark) */}
-        <BrandMark width={22} logoIndex={logoIndex} />
-
-        {/* Right: getting started + recent sessions */}
-        <Box flexDirection="column" flexGrow={1} gap={2}>
+        {/* Right: content */}
+        <Box flexDirection="column" flexGrow={1} paddingX={2} paddingY={1} gap={2}>
 
           <Box flexDirection="column">
             <Text bold color="#e8e8e8">Welcome back</Text>
@@ -134,7 +227,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onShowSes
             <Text bold color="#aaaaaa">Recent sessions</Text>
             {recent.length === 0
               ? <Text color="#555555">no sessions yet</Text>
-              : recent.map((s, i) => (
+              : recent.map((s) => (
                 <Box key={s.id} gap={2}>
                   <Text color="#4a9eff">{s.name.slice(0, 44)}</Text>
                   <Text color="#555555">{fmtDate(s.updatedAt)}</Text>
@@ -149,25 +242,31 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onShowSes
 
       {/* ── Status message ───────────────────────────────────── */}
       {statusMsg && (
-        <Box marginTop={1} paddingX={1} gap={1}>
+        <Box paddingX={1} gap={1}>
           <Text color="#4a9eff">!</Text>
           <Text color="#aaaaaa">{statusMsg}</Text>
         </Box>
       )}
 
       {/* ── Hints ────────────────────────────────────────────── */}
-      <Box marginTop={1} paddingX={1} gap={2}>
+      <Box paddingX={1} gap={2}>
         <Text color="#555555">/sessions</Text>
+        <Text color="#555555">·</Text>
+        <Text color="#555555">/settings</Text>
         <Text color="#555555">·</Text>
         <Text color="#555555">/model</Text>
         <Text color="#555555">·</Text>
+        <Text color="#555555">/provider</Text>
+        <Text color="#555555">·</Text>
         <Text color="#555555">/logo [1-3]</Text>
         <Text color="#555555">·</Text>
-        <Text color="#555555">Ctrl+K for commands</Text>
+        <Text color="#555555">/banner &lt;path&gt;</Text>
+        <Text color="#555555">·</Text>
+        <Text color="#555555">Ctrl+K</Text>
       </Box>
 
       {/* ── Input ────────────────────────────────────────────── */}
-      <Box marginTop={0} borderStyle="round" borderColor="#4a9eff" paddingX={2}>
+      <Box borderStyle="round" borderColor="#4a9eff" paddingX={2}>
         <Text color="#a78bfa">{'→ '}</Text>
         <TextInput
           value={task}

@@ -4,9 +4,11 @@ import { WelcomeScreen } from './screens/WelcomeScreen.js';
 import { UnifiedSession } from './screens/UnifiedSession.js';
 import { SessionsScreen } from './screens/SessionsScreen.js';
 import { StartupScreen } from './screens/StartupScreen.js';
+import { SettingsScreen } from './screens/SettingsScreen.js';
+import { useTerminalSize } from './hooks/useTerminalSize.js';
 import type { Session } from '../sessions/session-manager.js';
 
-type Screen = 'startup' | 'welcome' | 'session' | 'sessions-list';
+type Screen = 'startup' | 'welcome' | 'session' | 'sessions-list' | 'settings';
 
 interface AppProps {
   mockMode?: boolean;
@@ -18,6 +20,7 @@ export const App: React.FC<AppProps> = ({ mockMode }) => {
     mockMode ? 'Build a FastAPI backend with SQLite database' : undefined
   );
   const [resumeSession, setResumeSession] = useState<Session | undefined>();
+  const { columns, rows } = useTerminalSize();
 
   const handleStart = (task: string) => {
     setInitialTask(task);
@@ -38,15 +41,24 @@ export const App: React.FC<AppProps> = ({ mockMode }) => {
   };
 
   return (
-    <Box>
+    <Box width={columns} height={rows} flexDirection="column" overflow="hidden">
       {screen === 'startup' && (
         <StartupScreen onDone={() => setScreen('welcome')} />
       )}
       {screen === 'welcome' && (
-        <WelcomeScreen onStart={handleStart} onShowSessions={() => setScreen('sessions-list')} />
+        <WelcomeScreen
+          columns={columns}
+          rows={rows}
+          onStart={handleStart}
+          onShowSessions={() => setScreen('sessions-list')}
+          onShowSettings={() => setScreen('settings')}
+        />
       )}
       {screen === 'sessions-list' && (
         <SessionsScreen onBack={() => setScreen('welcome')} onResume={handleResumeSession} />
+      )}
+      {screen === 'settings' && (
+        <SettingsScreen onBack={() => setScreen('welcome')} />
       )}
       {screen === 'session' && (
         <UnifiedSession

@@ -15,20 +15,22 @@ export class OpenRouterProvider implements LLMProvider{
 
   constructor(apiKey: string, model?: string){ // stupid me had the naming set to apikey, but i use apiKey everywhere else :_)
     this.apiKey = apiKey;
-    this.model = model || 'arcee-ai/trinity-large-preview:free';
+    this.model = model || 'qwen/qwen3-coder:free';
   }
 
   // Context window sizes for common OpenRouter models
   private static readonly CONTEXT_WINDOWS: Record<string, number> = {
-    'qwen/qwen3.5': 32768,
+    'qwen/qwen3-coder': 262144,
     'qwen/qwen-2.5-72b-instruct': 131072,
+    'qwen/qwen3-8b': 131072,
     'meta-llama/llama-3.1-8b-instruct': 131072,
     'meta-llama/llama-3.2-3b-instruct': 131072,
+    'deepseek/deepseek-r1': 1000000,
+    'deepseek/deepseek-chat-v3-0324': 1000000,
     'anthropic/claude-3-5-sonnet': 200000,
     'anthropic/claude-3-haiku': 200000,
     'google/gemini-flash-1.5': 1000000,
     'mistralai/mistral-7b-instruct': 32768,
-    'arcee-ai/trinity-large-preview': 32768,
   };
 
   async getContextWindow(): Promise<number> {
@@ -61,19 +63,20 @@ export class OpenRouterProvider implements LLMProvider{
         method: `POST`,
         headers: {
           'Authorization' : `Bearer ${this.apiKey}`,
-          'Content-type': 'application/json',
-          'HTTP-Referer': 'https://github.com/Amar033/blonde-code',
-          'X-Title': 'Blonde-Code' ,
+          'Content-Type':  'application/json',
+          'HTTP-Referer':  'https://github.com/Amar033/blonde-code',
+          'X-Title':       'Blonde-Code',
         },
         body: JSON.stringify({
           model: this.model,
           messages: [
-            {role: 'system', content: systemPrompt},
-            {role: 'user', content: prompt}
+            { role: 'system', content: systemPrompt },
+            { role: 'user',   content: prompt },
           ],
           temperature: options?.temperature ?? 0.7,
-          max_tokens: options?.maxTokens ?? 2000,
+          max_tokens:  options?.maxTokens  ?? 2000,
         }),
+        signal: AbortSignal.timeout(options?.timeout ?? 120_000),
       });
       if (!response.ok){
         const errorText = await response.text();

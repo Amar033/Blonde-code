@@ -352,7 +352,14 @@ export class AgentRuntime {
     }
 
     if (this.state.status !== 'plan_ready') {
-      yield { type: 'abort', reason: 'Planning failed — model did not return a valid plan. Try rephrasing.' };
+      const stateReason = (this.state as any).reason as string | undefined;
+      // Surface the real error (API failures, auth errors, etc.) so the user knows what's wrong
+      const reason = stateReason
+        ? stateReason.startsWith('Planning Error:')
+          ? stateReason.replace('Planning Error: Error: ', '').replace('Planning Error: ', '')
+          : stateReason
+        : 'Planning failed — model did not return a valid plan. Try rephrasing.';
+      yield { type: 'abort', reason };
       return;
     }
 
@@ -455,20 +462,17 @@ export class AgentRuntime {
         };
         yield planEvent;
         this.emit(planEvent);
-      }else if (planResponse.type === 'answer'){
-        // direct answer
-        this.state={
+      } else if (planResponse.type === 'answer') {
+        this.state = { status: 'completed', finalAnswer: planResponse.content, turn: 1 };
+      } else if ((planResponse as any).type === 'need_info') {
+        // Model asked a clarifying question — surface it as a direct response instead of aborting
+        this.state = {
           status: 'completed',
-          finalAnswer: planResponse.content,
-          turn: 1
+          finalAnswer: (planResponse as any).question ?? 'I need more information to help you.',
+          turn: 1,
         };
-      }else {
-        // failed
-        this.state={
-          status: 'aborted',
-          reason: 'LLM failed to generate plan',
-          turn: 1
-        };
+      } else {
+        this.state = { status: 'aborted', reason: 'Model returned an unrecognised response type.', turn: 1 };
       }
 
    // // for now just the plan, but in time i will add the functionality to use the plan to enable acting phase

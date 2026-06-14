@@ -264,6 +264,15 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
   const [showPalette,     setShowPalette]     = useState(false);
   const [approvalRequest, setApprovalRequest] = useState<ApprovalRequest | null>(null);
   const [currentModel,    setCurrentModel]    = useState(process.env.LLM_MODEL || 'qwen3.5:latest');
+
+  // Sync status-bar model with the active registry provider on mount
+  useEffect(() => {
+    providerRegistry.getActive().then(active => {
+      if (active?.model) {
+        setCurrentModel(`${active.model} · ${active.type}:${active.name}`);
+      }
+    }).catch(() => {});
+  }, []);
   const [tokenUsage,      setTokenUsage]      = useState(0);
   const [contextWindow,   setContextWindow]   = useState(8192);
   const [contextWarned,   setContextWarned]   = useState(false);
@@ -352,24 +361,30 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
     if (mockMode) return;
     const mgr = new SessionManager();
     sessionMgrRef.current = mgr;
-    mgr.init().then(() => {
-      if (resumeSession) {
-        historyToRestoreRef.current = resumeSession.messages
-          .filter(m => m.role === 'user' || m.role === 'assistant')
-          .map(m => ({ role: m.role as 'user'|'assistant', content: m.content }));
-        for (const msg of resumeSession.messages) {
-          if (msg.role === 'user')      push({ kind: 'user', text: msg.content });
-          else if (msg.role === 'assistant') push({ kind: 'assistant', text: msg.content });
+    mgr.init()
+      .then(() => providerRegistry.getActive())
+      .then(active => {
+        const activeModel    = active?.model    ?? process.env.LLM_MODEL    ?? 'qwen3.5:latest';
+        const activeProvider = active?.type     ?? process.env.LLM_PROVIDER ?? 'ollama';
+        if (active?.model) setCurrentModel(`${active.model} · ${active.type}:${active.name}`);
+
+        if (resumeSession) {
+          historyToRestoreRef.current = resumeSession.messages
+            .filter(m => m.role === 'user' || m.role === 'assistant')
+            .map(m => ({ role: m.role as 'user'|'assistant', content: m.content }));
+          for (const msg of resumeSession.messages) {
+            if (msg.role === 'user')           push({ kind: 'user',      text: msg.content });
+            else if (msg.role === 'assistant') push({ kind: 'assistant', text: msg.content });
+          }
+          push({ kind: 'system', text: `Resumed session: ${resumeSession.name}` });
+          mgr.create(resumeSession.model || activeModel, resumeSession.provider || activeProvider);
+          mgr.setName(resumeSession.name);
+        } else {
+          mgr.create(activeModel, activeProvider);
         }
-        push({ kind: 'system', text: `Resumed session: ${resumeSession.name}` });
-        mgr.create(resumeSession.model || (process.env.LLM_MODEL ?? 'qwen3.5:latest'),
-                   resumeSession.provider || (process.env.LLM_PROVIDER ?? 'ollama'));
-        mgr.setName(resumeSession.name);
-      } else {
-        mgr.create(process.env.LLM_MODEL ?? 'qwen3.5:latest', process.env.LLM_PROVIDER ?? 'ollama');
-      }
-      if (initialTask) runTask(initialTask);
-    }).catch(() => { if (initialTask) runTask(initialTask); });
+        if (initialTask) runTask(initialTask);
+      })
+      .catch(() => { if (initialTask) runTask(initialTask); });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Mock mode: run immediately with fake event stream
