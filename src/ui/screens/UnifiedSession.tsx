@@ -95,10 +95,11 @@ function buildDiffRows(summary: string): DiffRow[] {
 const ItemView = memo(({ item }: { item: CompletedItem }) => {
   if (item.kind === 'user') {
     return (
-      <Box marginTop={1} gap={1}>
-        <Text color={theme.role.user} bold>{'▶'}</Text>
-        <Text color={theme.role.user} bold>You</Text>
-        <Text color={theme.text.primary}>{item.text}</Text>
+      <Box flexDirection="column" marginTop={1} flexShrink={0}>
+        <Text color={theme.role.user} bold>▶ You</Text>
+        <Box paddingLeft={3}>
+          <Text color={theme.text.primary} wrap="wrap">{item.text}</Text>
+        </Box>
       </Box>
     );
   }
@@ -106,7 +107,7 @@ const ItemView = memo(({ item }: { item: CompletedItem }) => {
   if (item.kind === 'plan') {
     const desc = item.first.length > 56 ? item.first.slice(0, 56) + '…' : item.first;
     return (
-      <Box marginLeft={2} marginTop={1} gap={1}>
+      <Box marginLeft={2} marginTop={1} gap={1} flexShrink={0}>
         <Text color={theme.text.dim}>◦</Text>
         <Text color={theme.text.dim}>Planning {item.stepCount} steps</Text>
         <Text color={theme.text.dim}>— {desc}</Text>
@@ -118,7 +119,7 @@ const ItemView = memo(({ item }: { item: CompletedItem }) => {
     const rows = buildDiffRows(item.result);
     const meta = rows.find(r => r.type === 'meta')?.content ?? '';
     return (
-      <Box flexDirection="column" marginLeft={2} marginTop={1}>
+      <Box flexDirection="column" marginLeft={2} marginTop={1} flexShrink={0}>
         <Box gap={1}>
           <Text color={theme.status.success}>◆</Text>
           <Text bold color={theme.syntax.keyword}>git_diff</Text>
@@ -155,7 +156,7 @@ const ItemView = memo(({ item }: { item: CompletedItem }) => {
     const lines    = rawLines.slice(0, MAX_ROWS).map(l => l.slice(0, MAX_LINE));
     const trunc    = rawLines.length > MAX_ROWS || item.result.length > MAX_LINE * MAX_ROWS;
     return (
-      <Box flexDirection="column" marginLeft={2} marginTop={1}>
+      <Box flexDirection="column" marginLeft={2} marginTop={1} flexShrink={0}>
         <Box gap={1}>
           <Text color={ic}>{icon}</Text>
           <Text bold color={theme.syntax.keyword}>{item.toolName}</Text>
@@ -177,28 +178,15 @@ const ItemView = memo(({ item }: { item: CompletedItem }) => {
   if (item.kind === 'assistant') {
     const sources = item.sources ?? [];
     return (
-      <Box flexDirection="column" marginTop={1}>
-        <Box gap={1}>
-          <Text color={theme.role.assistant} bold>{'◆'}</Text>
-          <Text color={theme.role.assistant} bold>Assistant</Text>
-        </Box>
+      <Box flexDirection="column" marginTop={1} flexShrink={0}>
+        <Text color={theme.role.assistant} bold>◆ Blonde</Text>
         <Box marginLeft={2} flexDirection="column">
           <MarkdownBlock text={item.text} />
         </Box>
         {sources.length > 0 && (
-          <Box flexDirection="column" marginLeft={2} marginTop={1}>
-            <Text color={theme.text.dim}>Sources</Text>
-            {sources.map((s, i) => {
-              const isLast = i === sources.length - 1;
-              const prefix = isLast ? '└' : '├';
-              const label = s.title.length > 50 ? s.title.slice(0, 49) + '…' : s.title;
-              return (
-                <Box key={i} gap={1}>
-                  <Text color={theme.text.dim}>{prefix} [{i + 1}]</Text>
-                  <Text color={theme.text.dim}>{label} — {s.url.slice(0, 60)}</Text>
-                </Box>
-              );
-            })}
+          <Box marginLeft={2} marginTop={1} gap={1} flexShrink={0}>
+            <Text color={theme.text.dim} dimColor>·</Text>
+            <Text color={theme.text.dim} dimColor>{sources.length} source{sources.length !== 1 ? 's' : ''}</Text>
           </Box>
         )}
       </Box>
@@ -207,7 +195,7 @@ const ItemView = memo(({ item }: { item: CompletedItem }) => {
 
   if (item.kind === 'system') {
     return (
-      <Box marginTop={1} gap={1}>
+      <Box marginTop={1} gap={1} flexShrink={0}>
         <Text color={theme.status.warning}>{'!'}</Text>
         <Text color={theme.text.secondary}>{item.text}</Text>
       </Box>
@@ -288,6 +276,7 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
   const idRef               = useRef(0);
   const toolStartMs         = useRef(Date.now());
   const toolCounterRef      = useRef(0);
+  const maxScrollRef        = useRef(0);
   const runtimeRef          = useRef<AgentRuntime | null>(null);
   const initPromiseRef      = useRef<Promise<AgentRuntime> | null>(null);
   const sessionMgrRef       = useRef<SessionManager | null>(null);
@@ -484,7 +473,13 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
 
         if (event.type === 'plan_generated') {
           clearStream();
-          push({ kind: 'plan', stepCount: event.plan.steps.length, first: event.plan.steps[0] ?? '' });
+          const rawStep = event.plan.steps[0] as unknown;
+          const firstStep = typeof rawStep === 'string'
+            ? rawStep
+            : rawStep && typeof rawStep === 'object'
+              ? ((rawStep as any).step_description ?? (rawStep as any).description ?? JSON.stringify(rawStep).slice(0, 80))
+              : '';
+          push({ kind: 'plan', stepCount: event.plan.steps.length, first: firstStep });
           setIsThinking(false);
         }
 
@@ -526,6 +521,7 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
           push({ kind: 'assistant', text: event.finalResponse, sources });
           setTurns(t => t + 1);
           mgr?.addMessage('assistant', event.finalResponse);
+          setScrollUp(0); // return to bottom so newest response is visible
           if (!mockMode) {
             const runtime = runtimeRef.current;
             if (runtime) {
@@ -722,7 +718,7 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
     if (key.ctrl && char === 'k' && !showPalette) { setShowPalette(true); return; }
 
     // Page Up / Page Down — scroll conversation from ANY focus, no Tab required
-    if (key.pageUp)   { setScrollUp(s => s + 10); return; }
+    if (key.pageUp)   { setScrollUp(s => Math.min(s + 10, maxScrollRef.current)); return; }
     if (key.pageDown) { setScrollUp(s => Math.max(0, s - 10)); return; }
 
     // Tab — cycle panel focus
@@ -737,9 +733,9 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
 
     // Conversation panel navigation (vim-style, only when conv is focused via Tab)
     if (focus === 'conv') {
-      if (key.upArrow || char === 'k')   { setScrollUp(s => s + 3); return; }
+      if (key.upArrow || char === 'k')   { setScrollUp(s => Math.min(s + 3, maxScrollRef.current)); return; }
       if (key.downArrow || char === 'j') { setScrollUp(s => Math.max(0, s - 3)); return; }
-      if (char === 'g') { setScrollUp(999); return; }
+      if (char === 'g') { setScrollUp(maxScrollRef.current); return; }
       if (char === 'G') { setScrollUp(0); return; }
     }
 
@@ -800,7 +796,40 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
     : 'Enter · submit   PgUp/PgDn · scroll   ↑ · history   Tab · panels   Ctrl+K · cmds';
 
   const convBorder  = focus === 'conv' ? theme.border.active : theme.border.normal;
-  const scrollPadH  = scrollUp > 0 ? Math.min(scrollUp, convH - 6) : 0;
+
+  // ── Slice-based scroll: estimate item heights, pick visible window ──
+  const mainW = Math.max(termCols - (useSidebar ? sideWidth : 0) - 8, 40);
+
+  const estItemH = (item: CompletedItem): number => {
+    if (item.kind === 'assistant') {
+      const wl = Math.ceil(item.text.length / mainW);
+      const nl = item.text.split('\n').length;
+      return Math.ceil(Math.max(wl, nl) * 1.4) + 3;
+    }
+    if (item.kind === 'user') return 2 + Math.ceil(item.text.length / mainW);
+    if (item.kind === 'tool') return 4;
+    if (item.kind === 'plan') return 2;
+    return 2;
+  };
+
+  const heights     = completed.map(estItemH);
+  const totalH      = heights.reduce((a, b) => a + b, 0);
+  const maxScroll   = Math.max(0, totalH - convH + 4);
+  maxScrollRef.current = maxScroll;
+
+  const clamped     = Math.min(scrollUp, maxScroll);
+  const windowEnd   = totalH - clamped;
+  const windowStart = Math.max(0, windowEnd - convH);
+  const displayItems: CompletedItem[] = [];
+  let cumH = 0;
+  for (let i = 0; i < completed.length; i++) {
+    const h = heights[i];
+    if (cumH + h > windowStart && cumH < windowEnd) displayItems.push(completed[i]);
+    cumH += h;
+  }
+
+  const firstVisible = displayItems.length > 0 ? completed.indexOf(displayItems[0]) : -1;
+  const lastVisible  = displayItems.length > 0 ? completed.indexOf(displayItems[displayItems.length - 1]) : -1;
 
   // ─── Render ───────────────────────────────────────────────
 
@@ -822,20 +851,64 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
           {/* Panel title */}
           <Box paddingX={1}>
             <Text color={theme.text.secondary} bold>Conversation</Text>
-            {scrollUp > 0 && <Text color={theme.text.dim}> ↑ scrolled</Text>}
+            {scrollUp > 0 && firstVisible >= 0 && (
+              <Text color={theme.text.dim}> ↑ msg {firstVisible + 1}–{lastVisible + 1}/{completed.length} · G=btm</Text>
+            )}
             {turns > 0 && <Text color={theme.text.dim}> · turn {turns}</Text>}
           </Box>
 
-          {/* column-reverse: newest content at bottom, old content clips at top */}
-          <Box flexDirection="column-reverse" flexGrow={1} overflow="hidden">
+          {/* Normal column with top spacer: content anchors to bottom, no column-reverse tricks */}
+          <Box flexDirection="column" flexGrow={1} overflow="hidden">
 
-            {/* Scroll padding — pushes content up when user scrolls */}
-            {scrollPadH > 0 && <Box height={scrollPadH} flexShrink={0} />}
+            {/* Flex spacer pushes all content to the bottom */}
+            <Box flexGrow={1} />
 
-            {/* Help panel — bottom of reversed area when shown */}
+            {/* Visible conversation slice — oldest-to-newest in natural order */}
+            {displayItems.map(item => (
+              <ItemView key={item.id} item={item} />
+            ))}
+
+            {/* Live: active tool */}
+            {activeTool && (
+              <Box marginLeft={2} marginTop={1} gap={1} flexShrink={0}>
+                <BrailleSpinner color={theme.status.running} />
+                <Text bold color={theme.syntax.keyword}>{activeTool.toolName}</Text>
+                {activeTool.argsSummary && <Text color={theme.text.dim}>({activeTool.argsSummary})</Text>}
+              </Box>
+            )}
+
+            {/* Live: streaming thinking */}
+            {isRunning && streamThinking && (
+              <Box marginLeft={2} marginTop={1} gap={1} flexShrink={0}>
+                <BrailleSpinner color={theme.status.running} />
+                <Text color={theme.text.dim}>
+                  {streamThinking.length > 160 ? '…' + streamThinking.slice(-160) : streamThinking}
+                </Text>
+              </Box>
+            )}
+
+            {/* Live: streaming response */}
+            {isRunning && !streamThinking && streamResponse && (
+              <Box marginLeft={2} marginTop={1} gap={1} flexShrink={0}>
+                <Text color={theme.role.assistant}>◆ </Text>
+                <Text color={theme.text.primary} wrap="wrap">{streamResponse}</Text>
+              </Box>
+            )}
+
+            {/* Live: fallback spinner */}
+            {isThinking && !activeTool && !streamThinking && !streamResponse && (
+              <Box marginLeft={2} marginTop={1} gap={1} flexShrink={0}>
+                <BrailleSpinner color={theme.status.running} />
+                <Text color={theme.text.secondary}>
+                  {agentStatus === 'planning' ? 'Planning…' : 'Thinking…'}
+                </Text>
+              </Box>
+            )}
+
+            {/* Help panel */}
             {showHelp && (
               <Box flexDirection="column" borderStyle="single" borderColor={theme.border.normal}
-                paddingX={2} paddingY={1} marginX={1} marginBottom={1}>
+                paddingX={2} paddingY={1} marginX={1} marginTop={1} flexShrink={0}>
                 <Text bold color={theme.brand}>Commands</Text>
                 <Text color={theme.text.dim}>stop / Ctrl+C  · interrupt agent</Text>
                 <Text color={theme.text.dim}>/clear /Ctrl+L · clear conversation</Text>
@@ -851,11 +924,11 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
               </Box>
             )}
 
-            {/* Approval panel — bottom of content, input stays focused */}
+            {/* Approval panel */}
             {approvalRequest && (
               <Box flexDirection="column" borderStyle="round"
                 borderColor={theme.status.warning} paddingX={2} paddingY={1}
-                marginX={1} marginBottom={1}>
+                marginX={1} marginTop={1} flexShrink={0}>
                 <Box gap={1}>
                   <Text color={theme.status.warning}>⚠</Text>
                   <Text bold color={theme.text.primary}>Approval needed —</Text>
@@ -892,59 +965,15 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
 
             {/* Context warning */}
             {ctxPct >= 80 && (
-              <Box borderStyle="round"
+              <Box borderStyle="round" flexShrink={0}
                 borderColor={ctxPct >= 90 ? theme.status.error : theme.status.warning}
-                paddingX={2} marginX={1} marginBottom={1}>
+                paddingX={2} marginX={1} marginTop={1}>
                 <Text color={ctxPct >= 90 ? theme.status.error : theme.status.warning}>
                   {ctxPct >= 90 ? `Context ${ctxPct}% full — /new now` : `Context ${ctxPct}% full — consider /new`}
                 </Text>
               </Box>
             )}
-
-            {/* Live: active tool */}
-            {activeTool && (
-              <Box marginLeft={2} marginTop={1} gap={1}>
-                <BrailleSpinner color={theme.status.running} />
-                <Text bold color={theme.syntax.keyword}>{activeTool.toolName}</Text>
-                {activeTool.argsSummary && <Text color={theme.text.dim}>({activeTool.argsSummary})</Text>}
-              </Box>
-            )}
-
-            {/* Live: streaming thinking */}
-            {isRunning && streamThinking && (
-              <Box marginLeft={2} marginTop={1} gap={1}>
-                <BrailleSpinner color={theme.status.running} />
-                <Text color={theme.text.dim}>
-                  {streamThinking.length > 160 ? '…' + streamThinking.slice(-160) : streamThinking}
-                </Text>
-              </Box>
-            )}
-
-            {/* Live: streaming response */}
-            {isRunning && !streamThinking && streamResponse && (
-              <Box marginLeft={2} marginTop={1} gap={1}>
-                <Text color={theme.role.assistant}>◆ </Text>
-                <Text color={theme.text.primary}>{streamResponse}</Text>
-              </Box>
-            )}
-
-            {/* Live: fallback spinner */}
-            {isThinking && !activeTool && !streamThinking && !streamResponse && (
-              <Box marginLeft={2} marginTop={1} gap={1}>
-                <BrailleSpinner color={theme.status.running} />
-                <Text color={theme.text.secondary}>
-                  {agentStatus === 'planning' ? 'Planning…' : 'Thinking…'}
-                </Text>
-              </Box>
-            )}
-
-            {/* Completed messages — reversed so newest sits at bottom */}
-            {[...completed].reverse().map(item => (
-              <ItemView key={item.id} item={item} />
-            ))}
           </Box>
-
-          <Box height={1} />
         </Box>
 
         {/* Right: sidebar — always visible because in the fixed-height row */}

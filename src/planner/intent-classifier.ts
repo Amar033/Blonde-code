@@ -53,6 +53,22 @@ const RULES: Rule[] = [
 // Only filter when we'd remove at least this many tools — avoids negligible reductions
 const MIN_REDUCTION = 2;
 
+// Greetings, thanks, one-word acks, and simple social messages that need no tools.
+const CONVERSATIONAL_RE =
+  /^(hi+|hello+|hey+|hiya|howdy|sup|yo+|lol+|haha+|heh|wow+|nice|cool|(ok(ay)?)|k|sure|(thanks?(\s+you)?)|thx|ty|(you'?re\s+welcome)|(good\s+(morning|afternoon|evening|night))|(how\s+are\s+you)|(how'?s\s+it\s+going)|bye|goodbye|cya|ttyl|(take\s+care)|(see\s+you))[.!?~]*\s*$/i;
+
+/**
+ * Returns true when the input is clearly a conversational message that needs
+ * no tools and no planning — greetings, acks, small talk, etc.
+ */
+export function isConversational(input: string): boolean {
+  const t = input.trim();
+  if (t.length === 0) return true;
+  // Single-word / very short messages are almost always conversational
+  if (t.length <= 5 && !/\w+\s+\w+/.test(t)) return true;
+  return CONVERSATIONAL_RE.test(t);
+}
+
 /**
  * Returns the names of tools relevant to this query.
  * Pass `totalTools` (total registered) so the function can decide if filtering is worth it.

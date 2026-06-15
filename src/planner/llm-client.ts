@@ -186,8 +186,13 @@ Rules:
 - ALWAYS respond with type "plan". Never respond with "need_info" or "answer" here.
 - If the request refers to something from the conversation history (e.g. "do that again", "repeat it"), look at the history to understand what to repeat.
 
-Respond ONLY with this JSON (no markdown fences, no extra text):
-{"type":"plan","steps":["step1","step2"],"reasoning":"why this approach","estimatedToolCalls":3}`,
+Decision rules:
+- If the request is purely conversational (greeting, thanks, "how are you", etc.) — respond: {"type":"answer","content":"your short friendly reply"}
+- If the request is a general question answerable without touching files or running code — respond: {"type":"answer","content":"your answer"}
+- For everything else (coding tasks, file edits, debugging, project creation, web search) — respond: {"type":"plan","steps":[...],"reasoning":"...","estimatedToolCalls":N}
+- Never respond with "need_info" here.
+
+Respond ONLY with valid JSON (no markdown fences, no extra text).`,
     };
   }
 
@@ -223,6 +228,25 @@ Respond ONLY with this JSON (no markdown fences, no extra text):
       }
     }
     yield { type: 'done', response: this.parseResponse(accumulated) };
+  }
+
+  // Direct conversational reply — no JSON schema, no plan/act loop.
+  // Used for greetings and small talk so the model never hallucinates a plan.
+  async quickReply(userMessage: string, history: ConversationTurn[] = []): Promise<string> {
+    const historySection = this.buildHistorySection(history);
+    const prompt = historySection
+      ? `${historySection}User: ${userMessage}`
+      : userMessage;
+    const response = await this.provider.call(prompt, {
+      mode: 'plan',
+      systemPrompt: this.buildSystemPrompt(
+        'You are Blonde, a helpful coding assistant. The user is sending you a casual greeting or short social message. Reply naturally and briefly in plain text — no JSON, no markdown, no tool calls. Just chat.'
+      ),
+      maxTokens: 120,
+      temperature: 0.8,
+      timeout: 30_000,
+    });
+    return response.content.trim() || 'Hey! What can I help you with?';
   }
 
   async generateSessionName(firstMessage: string): Promise<string> {
@@ -280,8 +304,8 @@ YOUR JOB:
 - Execute the plan step by step using the available tools
 - After each tool result, analyze the result and decide what to do next
 - If you have the answer to the user's request, respond with {"type": "answer", "content": "your answer"}
-  - For research/analysis tasks: write a comprehensive, well-structured markdown response with clear sections, key findings, and conclusions. Don't truncate or summarize — give the full detailed answer.
-  - For coding tasks: include the relevant code, explanation, and any caveats.
+  - For RESEARCH / web-search tasks: write a DETAILED, thorough response. Include all key findings, specific facts, names, dates, and quotes. Organize with clear markdown sections (## headers, bullet lists). Do NOT summarize briefly — produce a complete, in-depth answer. Aim for several hundred words if the topic warrants it.
+  - For coding tasks: include the full relevant code, explanation, and any caveats.
 - If you need more info, respond with {"type": "need_info", "question": "what you need"}
 - Otherwise, call another tool or continue with the plan
 
@@ -315,10 +339,12 @@ ${forceSynthesis ? '10. STOP NOW — provide your final answer immediately.' : '
     userInput?: string, toolCallHistory?: string, forceSynthesis?: boolean, history: ConversationTurn[] = []
   ): Promise<PlannerResponse> {
     const { prompt, systemPrompt } = this.buildActPrompt(plan, observations, availableTools, userInput, toolCallHistory, forceSynthesis, history);
+    const hasWebSearch = observations.some(o => /web.?search|searx|duckduckgo/i.test(o));
+    const maxTokens = forceSynthesis ? 7000 : hasWebSearch && observations.length >= 2 ? 5000 : 3000;
     const response = await this.provider.call(prompt, {
       mode: 'act', systemPrompt,
       temperature: this.getTemperature('act'),
-      maxTokens: 3000,
+      maxTokens,
     });
     this.trackUsage(response);
     return this.parseResponse(response.content);
@@ -330,7 +356,9 @@ ${forceSynthesis ? '10. STOP NOW — provide your final answer immediately.' : '
     userInput?: string, toolCallHistory?: string, forceSynthesis?: boolean, history: ConversationTurn[] = []
   ): AsyncGenerator<StreamChunk> {
     const { prompt, systemPrompt } = this.buildActPrompt(plan, observations, availableTools, userInput, toolCallHistory, forceSynthesis, history);
-    const opts: LLMCallOptions = { mode: 'act', systemPrompt, temperature: this.getTemperature('act'), maxTokens: 3000 };
+    const hasWebSearch = observations.some(o => /web.?search|searx|duckduckgo/i.test(o));
+    const maxTokens = forceSynthesis ? 7000 : hasWebSearch && observations.length >= 2 ? 5000 : 3000;
+    const opts: LLMCallOptions = { mode: 'act', systemPrompt, temperature: this.getTemperature('act'), maxTokens };
 
     if (!this.supportsStreaming()) {
       const res = await this.provider.call(prompt, opts);

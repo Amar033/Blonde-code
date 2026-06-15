@@ -9,7 +9,7 @@ import {ChainOfThoughtStrategy} from '../runtime/strategies/planning-strategy.js
 import {ToolRegistry} from '../tools/registry.js'
 import type {Tool} from '../tools/base.js'
 import type {AgentConfig} from '../agent/agent'
-import {classifyIntent} from '../planner/intent-classifier.js'
+import {classifyIntent, isConversational} from '../planner/intent-classifier.js'
 import {repoMapService} from '../services/repo-map.js'
 import {exec} from 'child_process'
 import {promisify} from 'util'
@@ -329,6 +329,26 @@ export class AgentRuntime {
 
     // Record user message before planning
     this.pushHistory('user', input);
+
+    // Pre-flight: skip plan/act entirely for greetings and small talk.
+    // Small models hallucinate plans (e.g. "create a project") for casual messages.
+    if (isConversational(input)) {
+      const priorHistory = this.conversationHistory.slice(0, -1); // exclude the turn we just pushed
+      try {
+        const reply = await this.llmClient!.quickReply(input, priorHistory);
+        this.pushHistory('assistant', reply);
+        this.state = { status: 'completed', finalAnswer: reply, turn: 1 };
+        const ce: AgentEvent = { type: 'complete', finalResponse: reply };
+        yield ce;
+        this.emit(ce);
+      } catch {
+        this.state = { status: 'completed', finalAnswer: 'Hey! How can I help?', turn: 1 };
+        const ce: AgentEvent = { type: 'complete', finalResponse: 'Hey! How can I help?' };
+        yield ce;
+        this.emit(ce);
+      }
+      return;
+    }
 
     // pass a snapshot of history (minus the turn we just added) so planner has prior context
     const historySnapshot = this.conversationHistory.slice(0, -1);
