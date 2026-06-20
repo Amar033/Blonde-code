@@ -141,3 +141,6 @@ vite.config.ts.timestamp-*
 
 .agents/
 skills-lock.json
+
+# owl-loader experiment (not used in production)
+owl-loader/
