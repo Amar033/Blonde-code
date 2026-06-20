@@ -401,8 +401,8 @@ const BrowseView: React.FC<BrowseViewProps> = (props) => {
   const hr     = '─'.repeat(inner);
 
   // ── Tab header row ──────────────────────────────────────────────────────────
-  const tabStr = tabs.map(t => tab === t ? `[${t}]` : t).join('  ');
-  const hint   = 'tab  esc back';
+  const tabStr = tabs.map(t => tab === t ? `[${t.toUpperCase()}]` : t).join('  ');
+  const hint   = 'tab  esc  back';
   const tabRow = ' ' + tabStr + ' '.repeat(Math.max(1, inner - tabStr.length - hint.length - 2)) + hint + ' ';
 
   // ── Build content lines ─────────────────────────────────────────────────────
@@ -414,7 +414,7 @@ const BrowseView: React.FC<BrowseViewProps> = (props) => {
   dim('┌' + hr + '┐');
   sec('│' + p(' BLONDE  ·  SETTINGS', inner) + '│', '#a78bfa');
   dim('├' + hr + '┤');
-  lines.push({ text: '│' + tabRow + '│', color: tab === 'backends' ? '#e8e8e8' : '#aaaaaa' });
+  lines.push({ text: '│' + tabRow + '│', color: '#e8e8e8' });
   dim('├' + hr + '┤');
 
   if (tab === 'backends') {
@@ -445,18 +445,23 @@ const BrowseView: React.FC<BrowseViewProps> = (props) => {
     const sel = backends[selected];
     if (sel) {
       dim('├' + hr + '┤');
-      const statusLabel = sel.status === 'running' ? '● running' : sel.status === 'installed' ? '○ installed' : '○ not-install';
-      sec('│ ' + p(`${sel.label}  ${statusLabel}  :${sel.port}`, inner - 2) + ' │', '#aaaaaa');
-      sec('│ ' + p(tr(DESCRIPTIONS[sel.type], inner - 2), inner - 2) + ' │', '#555555');
+      const statusLabel = sel.status === 'running' ? '● running' : sel.status === 'installed' ? '○ installed' : '○ not-installed';
+      const statusColor = sel.status === 'running' ? '#22c55e' : sel.status === 'installed' ? '#aaaaaa' : '#666666';
+      sec('│ ' + p(`${sel.label}  ${statusLabel}  :${sel.port}`, inner - 2) + ' │', statusColor);
+      sec('│ ' + p(tr(DESCRIPTIONS[sel.type], inner - 2), inner - 2) + ' │', '#666666');
       if (sel.status === 'running' && sel.models.length > 0) {
-        const mdlStr = sel.models.slice(0, 4).map(m => m.size ? `${m.id}(${m.size})` : m.id).join(' · ');
+        const mdlStr = sel.models.slice(0, 3).map(m => m.size ? `${m.id} (${m.size})` : m.id).join(' · ');
         sec('│ ' + p(`models: ${tr(mdlStr, inner - 10)}`, inner - 2) + ' │', '#4a9eff');
       }
       if (sel.type === 'lmstudio' && sel.status === 'installed') {
         sec('│ ' + p('Open LM Studio → Developer tab → Start Server, then press r', inner - 2) + ' │', '#f59e0b');
       }
       if (sel.runningInDocker) {
-        sec('│ ' + p(`container: blonde-${sel.type}`, inner - 2) + ' │', '#444444');
+        sec('│ ' + p(`container: blonde-${sel.type}`, inner - 2) + ' │', '#555555');
+      }
+      const actHint = backendActionDetail(sel);
+      if (actHint) {
+        sec('│ ' + p(actHint, inner - 2) + ' │', '#a78bfa');
       }
     }
 
@@ -483,21 +488,29 @@ const BrowseView: React.FC<BrowseViewProps> = (props) => {
     const selEntry = cpd ? providerEntries.find(e => e.type === cpd.providerType) : undefined;
     if (cpd) {
       dim('├' + hr + '┤');
-      sec('│ ' + p(`${cpd.label}  —  ${tr(cpd.desc, inner - cpd.label.length - 6)}`, inner - 2) + ' │', '#aaaaaa');
+      const confDot   = selEntry?.apiKey ? '●' : '○';
+      const confTxt   = selEntry?.apiKey ? (selEntry.isActive ? 'configured  ACTIVE' : 'configured') : 'not configured';
+      const confColor = selEntry?.isActive ? '#22c55e' : selEntry?.apiKey ? '#aaaaaa' : '#666666';
+      sec('│ ' + p(`${cpd.label}  ${confDot} ${confTxt}`, inner - 2) + ' │', confColor);
+      sec('│ ' + p(tr(cpd.desc, inner - 2), inner - 2) + ' │', '#666666');
       if (selEntry?.apiKey) {
-        sec('│ ' + p(`key: ${maskKey(selEntry.apiKey)}   model: ${selEntry.model}`, inner - 2) + ' │', '#4a9eff');
-        sec('│ ' + p(`env: ${cpd.keyEnvVar}`, inner - 2) + ' │', '#555555');
-        sec('│ ' + p(`enter set-active/deactivate   k edit-key   m model   x remove`, inner - 2) + ' │', '#a78bfa');
+        sec('│ ' + p(`key: ${maskKey(selEntry.apiKey)}   model: ${selEntry.model ?? '(none)'}`, inner - 2) + ' │', '#4a9eff');
+        sec('│ ' + p(`env: ${cpd.keyEnvVar}   stored at ~/.blonde/providers.json`, inner - 2) + ' │', '#555555');
+        const activeHint = selEntry.isActive ? 'enter → deactivate' : 'enter → set active';
+        sec('│ ' + p(`${activeHint}   k → edit key   m → model   x → remove`, inner - 2) + ' │', '#a78bfa');
       } else {
-        sec('│ ' + p(`key format: ${cpd.keyHint}   env: ${cpd.keyEnvVar}`, inner - 2) + ' │', '#555555');
-        sec('│ ' + p('enter or k — enter API key to configure', inner - 2) + ' │', '#a78bfa');
+        sec('│ ' + p(`key format: ${cpd.keyHint}`, inner - 2) + ' │', '#555555');
+        sec('│ ' + p(`env: ${cpd.keyEnvVar}`, inner - 2) + ' │', '#555555');
+        sec('│ ' + p('enter or k → add API key to configure', inner - 2) + ' │', '#a78bfa');
       }
     }
 
   } else if (tab === 'models') {
+    sec('│ ' + p('Loaded models in running local backends', inner - 2) + ' │', '#555555');
+    dim('├' + hr + '┤');
     const running = backends.filter(b => b.status === 'running');
     if (running.length === 0) {
-      sec('│ ' + p('No local backends running. Start one in the Backends tab first.', inner - 2) + ' │', '#555555');
+      sec('│ ' + p('No local backends running — start one in the Backends tab first.', inner - 2) + ' │', '#666666');
     } else {
       for (const b of running) {
         sec('│ ' + p(b.label, inner - 2) + ' │', '#a78bfa');
@@ -543,7 +556,7 @@ const BrowseView: React.FC<BrowseViewProps> = (props) => {
         </box>
       ))}
       <box paddingLeft={lp + 2}>
-        <text fg="#444444">{hints[tab]}</text>
+        <text fg="#555555">{hints[tab]}</text>
       </box>
       <box flexGrow={1} />
     </box>
@@ -563,6 +576,23 @@ function actionHint(b: BackendInfo): string {
   }
   if (isDesktopApp(b.type)) return 'open lmstudio.ai';
   return 'enter install';
+}
+
+function backendActionDetail(b: BackendInfo): string {
+  if (b.status === 'running') {
+    if (isDesktopApp(b.type)) return 'enter → select model';
+    const parts: string[] = ['enter → stop'];
+    if (b.type !== 'airllm') parts.push('s → switch model');
+    if (b.type !== 'ollama' && b.type !== 'lmstudio') parts.push('c → configure');
+    parts.push('r → refresh');
+    return parts.join('   ');
+  }
+  if (b.status === 'installed') {
+    if (isDesktopApp(b.type)) return 'start server in LM Studio app first';
+    return supportsDocker(b.type) ? 'enter → start  (choose docker or native)' : 'enter → start';
+  }
+  if (isDesktopApp(b.type)) return 'visit lmstudio.ai to download & install';
+  return supportsDocker(b.type) ? 'enter → install  (choose docker or native)' : 'enter → install';
 }
 
 // ── Cookbooks ─────────────────────────────────────────────────────────────────
