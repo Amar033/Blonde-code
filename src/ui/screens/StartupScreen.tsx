@@ -5,7 +5,6 @@ import { loadUiConfig } from '../../services/ui-config.js';
 import { brandArtFor, getUsername, pickGreeting } from '../brand.js';
 import { theme } from '../theme.js';
 
-// ─── Try to get an AI greeting (short timeout, silent fallback) ───────────────
 async function fetchAiGreeting(name: string): Promise<string> {
   try {
     const baseUrl  = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
@@ -55,7 +54,7 @@ const DOTS = ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏'];
 interface StartupScreenProps { onDone: () => void; }
 
 export const StartupScreen: React.FC<StartupScreenProps> = ({ onDone }) => {
-  const { width: cols }           = useTerminalDimensions();
+  const { width: cols, height: rows } = useTerminalDimensions();
   const [tick,      setTick]      = useState(0);
   const [logs,      setLogs]      = useState<LogLine[]>([]);
   const [done,      setDone]      = useState(false);
@@ -107,62 +106,72 @@ export const StartupScreen: React.FC<StartupScreenProps> = ({ onDone }) => {
     return ' '.repeat(p) + s;
   };
 
-  const divider = '─'.repeat(Math.max(0, cols - 4));
+  // ── Vertical centering (same approach as WelcomeScreen) ───────────────────────
+  const artRows   = brandArtFor(cols, customArt).length;
+  const logCount  = Math.max(1, logs.length) + (done ? 1 : 0);
+  const blockRows = artRows + 1 + 1 + logCount; // art + greeting + gap + logs
+  const topPad    = Math.max(1, Math.floor((rows - blockRows) / 2) - 1);
+
+  // ── Status block width — matches welcome screen's box width ───────────────────
+  const blockW  = Math.min(90, Math.max(44, Math.floor(cols * 0.60)));
+  const blockLP = Math.max(0, Math.floor((cols - blockW) / 2));
 
   return (
-    <box flexDirection="column" width={cols}>
+    <box flexDirection="column" width={cols} height={rows}>
 
-      {/* ── Vertical padding above brand art ── */}
-      <box height={3} />
+      {/* ── Top spacer ── */}
+      <box height={topPad} />
 
-      {/* ── ASCII brand art (centered) ── */}
+      {/* ── ASCII brand art ── */}
       {brandArtFor(cols, customArt).map((line, i) => (
         <box key={i}>
           <text fg={theme.brand}>{centre(line)}</text>
         </box>
       ))}
 
-      {/* ── Greeting (centered) ── */}
-      <box marginTop={1}>
-        <text fg={theme.text.secondary}>{centre(greeting)}</text>
+      {/* ── Greeting — right below banner ── */}
+      <box>
+        <text fg={theme.text.dim}>{centre(greeting)}</text>
       </box>
 
-      {/* ── Divider ── */}
-      <box marginTop={2}>
-        <text fg={theme.border.dim}>{'  '}{divider}</text>
-      </box>
+      {/* ── Gap ── */}
+      <box height={1} />
 
-      {/* ── Status lines — each is ONE centered <text>, never two ── */}
-      <box marginTop={1}>
-        {logs.length === 0 ? (
-          <text fg={theme.brand}>{centre(`${DOTS[tick % DOTS.length]}  Starting up…`)}</text>
-        ) : null}
-      </box>
+      {/* ── Spinner / status lines — left-aligned to the centered block ── */}
+      {logs.length === 0 ? (
+        <box paddingLeft={blockLP}>
+          <text fg={theme.brand}>{`${DOTS[tick % DOTS.length]}  Starting up…`}</text>
+        </box>
+      ) : null}
 
       {logs.map((line, i) => {
         const isActive = i === logs.length - 1 && !done;
         const sp   = DOTS[tick % DOTS.length];
-        const icon = isActive           ? sp
+        const icon = isActive              ? sp
                    : line.level === 'ok'    ? '✓'
                    : line.level === 'warn'  ? '⚠'
-                   : line.level === 'error' ? '✗' : '·';
-        const fg   = isActive           ? theme.brand
+                   : line.level === 'error' ? '✗'
+                   : '·';
+        const fg   = isActive              ? theme.brand
                    : line.level === 'ok'    ? theme.status.success
                    : line.level === 'warn'  ? theme.status.warning
                    : line.level === 'error' ? theme.status.error
                    : theme.text.dim;
         return (
-          <box key={i}>
-            <text fg={fg}>{centre(`${icon}  ${line.text}`)}</text>
+          <box key={i} paddingLeft={blockLP}>
+            <text fg={fg}>{`${icon}  ${line.text}`}</text>
           </box>
         );
       })}
 
       {done && (
-        <box marginTop={1}>
-          <text fg={theme.status.success}>{centre('◆  Ready')}</text>
+        <box paddingLeft={blockLP}>
+          <text fg={theme.status.success}>{'◆  Ready'}</text>
         </box>
       )}
+
+      {/* ── Push to fill remaining space ── */}
+      <box flexGrow={1} />
 
     </box>
   );
