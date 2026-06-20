@@ -11,6 +11,8 @@ export interface UiConfig {
   brandArt?:  string[];
   /** Static greeting override — skips AI greeting generation */
   greeting?:  string;
+  /** Show the animated flower background on startup and welcome screens (default: true) */
+  flowerBg?:  boolean;
 }
 
 export async function loadUiConfig(): Promise<UiConfig> {

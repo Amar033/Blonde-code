@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useKeyboard, useRenderer } from '@opentui/react';
+import { FlowerBackground } from '../components/FlowerBackground.js';
 import { execSync } from 'child_process';
 import { SessionManager, type Session } from '../../sessions/session-manager.js';
 import { LOGO_OPTIONS } from '../components/BrandMark.js';
@@ -64,6 +65,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
   const [gitBranch]               = useState<string | null>(getGitBranch);
   const [customArt, setCustomArt] = useState<string[] | undefined>();
   const [greeting,  setGreeting]  = useState('');
+  const [flowerBg,  setFlowerBg]  = useState(true);
   const inputRef = useRef<any>(null);
   const renderer = useRenderer();
 
@@ -83,6 +85,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
 
     loadUiConfig().then(cfg => {
       if (cfg.brandArt && cfg.brandArt.length > 0) setCustomArt(cfg.brandArt);
+      if (cfg.flowerBg === false) setFlowerBg(false);
     }).catch(() => {});
 
     const name = getUsername();
@@ -147,6 +150,19 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
       } else {
         setStatusMsg(`file not found: ${p}`);
       }
+      return;
+    }
+
+    if (v === '/background off' || v === '/bg off') {
+      setFlowerBg(false);
+      saveUiConfig({ flowerBg: false }).catch(() => {});
+      setStatusMsg('flower background off  ·  /background on to restore');
+      return;
+    }
+    if (v === '/background on' || v === '/bg on') {
+      setFlowerBg(true);
+      saveUiConfig({ flowerBg: true }).catch(() => {});
+      setStatusMsg('flower background on');
       return;
     }
 
@@ -236,8 +252,8 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
 
   // ── Row centering helper: emit a full-width row with the content block at centre
   const Row: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-    <box flexDirection="row" width={columns}>
-      <box width={leftPad} />
+    <box flexDirection="row" width={columns} shouldFill={false}>
+      <box width={leftPad} shouldFill={false} />
       {children}
     </box>
   );
@@ -245,23 +261,26 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
   return (
     <box flexDirection="column" width={columns} height={rows}>
 
+      {/* ── Flower bloom background (absolute, renders behind content) ── */}
+      {flowerBg && <FlowerBackground cols={columns} rows={rows} />}
+
       {/* ── Top spacer ── */}
-      <box height={topPad} />
+      <box height={topPad} shouldFill={false} />
 
       {/* ── ASCII brand art (centered by string padding) ── */}
       {brandArtFor(columns, customArt).map((line, i) => (
-        <box key={i}>
+        <box key={i} shouldFill={false}>
           <text fg={theme.brand}>{centre(line, columns)}</text>
         </box>
       ))}
 
       {/* ── Greeting — directly below banner, centered ── */}
-      <box>
+      <box shouldFill={false}>
         <text fg={theme.text.dim}>{centre(greeting, columns)}</text>
       </box>
 
       {/* ── Gap ── */}
-      <box height={1} />
+      <box height={1} shouldFill={false} />
 
       {/* ── Status message ── */}
       {statusMsg !== '' && (
@@ -290,19 +309,19 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
       </Row>
 
       {/* ── Provider · model — left-aligned to input box ── */}
-      <box paddingLeft={leftPad + 1}>
+      <box paddingLeft={leftPad + 1} shouldFill={false}>
         <text fg={theme.text.dim}>{infoLine}</text>
       </box>
 
       {/* ── Commands hint — left-aligned to input box ── */}
-      <box paddingLeft={leftPad + 1}>
-        <text fg={theme.text.dim}>{'tab  sessions    /settings    /model    /provider'}</text>
+      <box paddingLeft={leftPad + 1} shouldFill={false}>
+        <text fg={theme.text.dim}>{'tab  sessions    /settings    /model    /provider    /background off'}</text>
       </box>
 
       {/* ── NFO sessions box ── */}
       {nfoLines.length > 0 && (
         <>
-          <box height={1} />
+          <box height={1} shouldFill={false} />
           {nfoLines.map((line, i) => (
             <Row key={i}>
               <text fg={line.isBorder ? theme.border.normal : theme.text.secondary}>
@@ -314,10 +333,10 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
       )}
 
       {/* ── Push bottom bar down ── */}
-      <box flexGrow={1} />
+      <box flexGrow={1} shouldFill={false} />
 
       {/* ── Bottom status bar ── */}
-      <box>
+      <box shouldFill={false}>
         <text fg={theme.text.dim}>{bottomBar.slice(0, columns)}</text>
       </box>
 

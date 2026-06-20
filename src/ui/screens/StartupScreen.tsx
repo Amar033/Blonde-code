@@ -4,6 +4,7 @@ import { ensureSearXNG } from '../../services/searxng-manager.js';
 import { loadUiConfig } from '../../services/ui-config.js';
 import { brandArtFor, getUsername, pickGreeting } from '../brand.js';
 import { theme } from '../theme.js';
+import { FlowerBackground } from '../components/FlowerBackground.js';
 
 async function fetchAiGreeting(name: string): Promise<string> {
   try {
@@ -60,6 +61,7 @@ export const StartupScreen: React.FC<StartupScreenProps> = ({ onDone }) => {
   const [done,      setDone]      = useState(false);
   const [greeting,  setGreeting]  = useState('');
   const [customArt, setCustomArt] = useState<string[] | undefined>();
+  const [flowerBg,  setFlowerBg]  = useState(true);
 
   useEffect(() => {
     const id = setInterval(() => setTick(t => t + 1), 100);
@@ -73,6 +75,7 @@ export const StartupScreen: React.FC<StartupScreenProps> = ({ onDone }) => {
     loadUiConfig().then(cfg => {
       if (cfg.brandArt && cfg.brandArt.length > 0) setCustomArt(cfg.brandArt);
       if (cfg.greeting) setGreeting(cfg.greeting);
+      if (cfg.flowerBg === false) setFlowerBg(false);
     }).catch(() => {});
   }, []);
 
@@ -119,27 +122,30 @@ export const StartupScreen: React.FC<StartupScreenProps> = ({ onDone }) => {
   return (
     <box flexDirection="column" width={cols} height={rows}>
 
+      {/* ── Flower bloom background (absolute, renders behind content) ── */}
+      {flowerBg && <FlowerBackground cols={cols} rows={rows} />}
+
       {/* ── Top spacer ── */}
-      <box height={topPad} />
+      <box height={topPad} shouldFill={false} />
 
       {/* ── ASCII brand art ── */}
       {brandArtFor(cols, customArt).map((line, i) => (
-        <box key={i}>
+        <box key={i} shouldFill={false}>
           <text fg={theme.brand}>{centre(line)}</text>
         </box>
       ))}
 
       {/* ── Greeting — right below banner ── */}
-      <box>
+      <box shouldFill={false}>
         <text fg={theme.text.dim}>{centre(greeting)}</text>
       </box>
 
       {/* ── Gap ── */}
-      <box height={1} />
+      <box height={1} shouldFill={false} />
 
       {/* ── Spinner / status lines — left-aligned to the centered block ── */}
       {logs.length === 0 ? (
-        <box paddingLeft={blockLP}>
+        <box paddingLeft={blockLP} shouldFill={false}>
           <text fg={theme.brand}>{`${DOTS[tick % DOTS.length]}  Starting up…`}</text>
         </box>
       ) : null}
@@ -158,20 +164,20 @@ export const StartupScreen: React.FC<StartupScreenProps> = ({ onDone }) => {
                    : line.level === 'error' ? theme.status.error
                    : theme.text.dim;
         return (
-          <box key={i} paddingLeft={blockLP}>
+          <box key={i} paddingLeft={blockLP} shouldFill={false}>
             <text fg={fg}>{`${icon}  ${line.text}`}</text>
           </box>
         );
       })}
 
       {done && (
-        <box paddingLeft={blockLP}>
+        <box paddingLeft={blockLP} shouldFill={false}>
           <text fg={theme.status.success}>{'◆  Ready'}</text>
         </box>
       )}
 
       {/* ── Push to fill remaining space ── */}
-      <box flexGrow={1} />
+      <box flexGrow={1} shouldFill={false} />
 
     </box>
   );
