@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useKeyboard } from '@opentui/react';
+import { useKeyboard, useRenderer } from '@opentui/react';
 import { execSync } from 'child_process';
 import { SessionManager, type Session } from '../../sessions/session-manager.js';
 import { LOGO_OPTIONS } from '../components/BrandMark.js';
@@ -24,14 +24,19 @@ function fmtDate(iso: string): string {
   const diff = Date.now() - d.getTime();
   const days = Math.floor(diff / 86400000);
   if (days === 0) return 'today';
-  if (days === 1) return 'yesterday';
-  if (days < 7)  return `${days}d ago`;
+  if (days === 1) return '1d';
+  if (days < 7)  return `${days}d`;
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
 function centre(s: string, width: number): string {
   const pad = Math.max(0, Math.floor((width - s.length) / 2));
   return ' '.repeat(pad) + s;
+}
+
+function truncate(s: string, max: number): string {
+  if (max <= 1) return '';
+  return s.length > max ? s.slice(0, max - 1) + '…' : s;
 }
 
 const CWD = process.cwd().replace(os.homedir(), '~');
@@ -60,6 +65,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
   const [customArt, setCustomArt] = useState<string[] | undefined>();
   const [greeting,  setGreeting]  = useState('');
   const inputRef = useRef<any>(null);
+  const renderer = useRenderer();
 
   useEffect(() => {
     const mgr = new SessionManager();
@@ -83,16 +89,12 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
     setGreeting(pickGreeting(name));
   }, []);
 
-  const divider = '─'.repeat(Math.max(0, columns - 4));
+  // ── Layout: box is 60% of terminal, capped at 90 cols, min 44 ────────────────
+  const boxWidth   = Math.min(90, Math.max(44, Math.floor(columns * 0.60)));
+  const leftPad    = Math.max(0, Math.floor((columns - boxWidth) / 2));
+  const innerWidth = boxWidth - 2; // inside border chars
 
-  // ── Centered input box width (65% of terminal, like OpenCode) ──────────────
-  const inputWidth   = Math.min(columns - 8, Math.max(40, Math.floor(columns * 0.65)));
-  const inputLeftPad = Math.floor((columns - inputWidth) / 2);
-
-  // ── Sessions block width (matches input box) ───────────────────────────────
-  const blockWidth = inputWidth;
-
-  // ── Bottom bar: CWD:branch (left)   provider · model (right) ──────────────
+  // ── Bottom bar ────────────────────────────────────────────────────────────────
   const leftBar  = `  ${CWD}${gitBranch ? `:${gitBranch}` : ''}`;
   const rightBar = `${provider}  ·  ${model}  `;
   const barPad   = Math.max(1, columns - leftBar.length - rightBar.length);
@@ -179,105 +181,142 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
   };
 
   useKeyboard((key) => {
-    if (key.name === 'escape') { setTask(''); if (inputRef.current) inputRef.current.value = ''; }
+    if (key.ctrl && key.name === 'c') { renderer.destroy(); return; }
+    if (key.name === 'tab')           { onShowSessions(); return; }
+    if (key.name === 'escape')        { setTask(''); if (inputRef.current) inputRef.current.value = ''; }
   });
 
-  // Build session rows as single strings (no two-<text> wrapping risk)
-  // Columns: name (left) · date (fixed 11 chars) · model (fixed 16 chars)
-  const dateW  = 11;
-  const modelW = 16;
-  const prefW  = 4; // "  ▸ "
-  const nameW  = Math.max(6, blockWidth - prefW - dateW - modelW - 4); // 4 for separators
+  // ── NFO-style sessions: hand-drawn ASCII box, fixed to boxWidth ───────────────
+  // Columns inside: name  ·  date(5)  ·  model(18)
+  const dateW  = 5;
+  const mdlW   = 18;
+  // 2 side spaces + name + 2 + date + 2 + model + 2 side spaces = innerWidth
+  const nameW  = Math.max(4, innerWidth - 2 - dateW - 2 - mdlW - 2);
 
-  const sessionLines = recent.map(s => {
-    const date  = fmtDate(s.updatedAt).padEnd(dateW);
-    const mdl   = (s.model || '—').slice(0, modelW).padEnd(modelW);
-    const name  = s.name.slice(0, nameW).padEnd(nameW);
-    return `  ▸ ${name}  ${date}  ${mdl}`;
-  });
+  const nfoLines: Array<{ text: string; isBorder: boolean }> = [];
+  if (recent.length > 0) {
+    const barFull = '─'.repeat(innerWidth);
+    const hdrNameS  = 'name'.padEnd(nameW);
+    const hdrDateS  = 'when'.padEnd(dateW);
+    const hdrMdlS   = 'model'.padEnd(mdlW);
+    const headerRow = ' ' + hdrNameS + '  ' + hdrDateS + '  ' + hdrMdlS + ' ';
 
-  // artRows: 7 wide / 5 narrow + 1 subtitle + 1 divider + sessions
-  const artRows      = (columns >= 100 ? 7 : 5);
-  const contentRows  = 2 /* greeting+gap */ + artRows + 2 /* sub+div */ + (recent.length > 0 ? 1 + recent.length : 0) + 2 /* spacer */ + 3 /* input */ + 1 /* hints */ + 1 /* bar */;
-  const topPad       = Math.max(1, Math.min(6, Math.floor((rows - contentRows) / 3)));
+    nfoLines.push({ text: '┌' + barFull + '┐',       isBorder: true });
+    nfoLines.push({ text: '│' + headerRow + '│',      isBorder: true });
+    nfoLines.push({ text: '├' + barFull + '┤',        isBorder: true });
+
+    for (const s of recent) {
+      const nameCol = truncate(s.name || '(untitled)', nameW).padEnd(nameW);
+      const dateCol = fmtDate(s.updatedAt).padEnd(dateW);
+      const mdlCol  = truncate(s.model || '—', mdlW).padEnd(mdlW);
+      const row = ' ' + nameCol + '  ' + dateCol + '  ' + mdlCol + ' ';
+      nfoLines.push({ text: '│' + row + '│', isBorder: false });
+    }
+
+    nfoLines.push({ text: '└' + barFull + '┘', isBorder: true });
+  }
+
+  // ── Info line below input box ─────────────────────────────────────────────────
+  const providerLabel = truncate(provider, Math.floor(boxWidth * 0.45));
+  const modelLabel    = truncate(model, Math.floor(boxWidth * 0.45));
+  const infoLine      = `${providerLabel}  ·  ${modelLabel}`;
+
+  // ── Vertical centering ────────────────────────────────────────────────────────
+  const artRows    = brandArtFor(columns, customArt).length;
+  const blockRows  = artRows
+    + 1  // greeting
+    + 1  // gap
+    + (statusMsg ? 1 : 0)
+    + 3  // input box: top border + input row + bottom border
+    + 1  // provider · model info
+    + 1  // hints
+    + (nfoLines.length > 0 ? nfoLines.length + 1 : 0)
+    + 1; // bottom bar
+  const topPad = Math.max(1, Math.floor((rows - blockRows) / 2) - 1);
+
+  // ── Row centering helper: emit a full-width row with the content block at centre
+  const Row: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+    <box flexDirection="row" width={columns}>
+      <box width={leftPad} />
+      {children}
+    </box>
+  );
 
   return (
     <box flexDirection="column" width={columns} height={rows}>
 
-      {/* ── Greeting (top-left, subtle) ── */}
-      <box paddingLeft={2}>
-        <text fg={theme.text.dim}>{greeting}</text>
-      </box>
-
       {/* ── Top spacer ── */}
       <box height={topPad} />
 
-      {/* ── ASCII brand art (centered) ── */}
+      {/* ── ASCII brand art (centered by string padding) ── */}
       {brandArtFor(columns, customArt).map((line, i) => (
         <box key={i}>
           <text fg={theme.brand}>{centre(line, columns)}</text>
         </box>
       ))}
 
-      {/* ── Subtitle (centered, right below art) ── */}
-      <box marginTop={1}>
-        <text fg={theme.text.dim}>{centre('AI Coding Agent  ·  ask me to read, edit, search, or refactor', columns)}</text>
-      </box>
-
-      {/* ── Divider ── */}
-      <box marginTop={1}>
-        <text fg={theme.border.dim}>{'  '}{divider}</text>
-      </box>
-
-      {/* ── Recent sessions (centered block, top 5, name + date + model) ── */}
-      {recent.length > 0 && (
-        <box flexDirection="column" paddingTop={1}>
-          <box>
-            <text fg={theme.text.dim}>{centre('Recent', columns)}</text>
-          </box>
-          {sessionLines.map((line, i) => (
-            <box key={i}>
-              <text fg={theme.text.secondary}>{centre(line, columns)}</text>
-            </box>
-          ))}
-        </box>
-      )}
-
-      {/* ── Small spacer between sessions and input ── */}
-      <box height={2} />
-
-      {/* ── Input box — centered, 65% width ── */}
-      {statusMsg !== '' && (
-        <box paddingLeft={inputLeftPad}>
-          <text fg={theme.text.link}>{`! ${statusMsg.slice(0, inputWidth - 4)}`}</text>
-        </box>
-      )}
-      <box paddingLeft={inputLeftPad} borderStyle="rounded" borderColor={theme.border.active} paddingRight={1}>
-        <text fg={theme.role.assistant}>{'→ '}</text>
-        <input
-          ref={inputRef}
-          focused={true}
-          value={task}
-          onInput={(v: string) => setTask(v)}
-          onSubmit={() => handleSubmit()}
-          placeholder="What can I help you build today?"
-          width={Math.max(20, inputWidth - 6)}
-          textColor={theme.text.primary}
-          cursorColor={theme.text.link}
-          backgroundColor="transparent"
-          focusedBackgroundColor="transparent"
-        />
-      </box>
-
-      {/* ── Hints (centered) ── */}
+      {/* ── Greeting — directly below banner, centered ── */}
       <box>
-        <text fg={theme.text.dim}>{centre('/sessions  /settings  /model  /provider  /logo [1-3]', columns)}</text>
+        <text fg={theme.text.dim}>{centre(greeting, columns)}</text>
       </box>
 
-      {/* ── Push bottom bar to bottom ── */}
+      {/* ── Gap ── */}
+      <box height={1} />
+
+      {/* ── Status message ── */}
+      {statusMsg !== '' && (
+        <Row>
+          <text fg={theme.text.link}>{`! ${truncate(statusMsg, innerWidth - 2)}`}</text>
+        </Row>
+      )}
+
+      {/* ── Input box: clean single-line, no arrow, bordered ── */}
+      <Row>
+        <box width={boxWidth} borderStyle="rounded" borderColor={theme.border.active}>
+          <input
+            ref={inputRef}
+            focused={true}
+            value={task}
+            onInput={(v: string) => setTask(v)}
+            onSubmit={() => handleSubmit()}
+            placeholder="Ask anything..."
+            width={Math.max(10, boxWidth - 4)}
+            textColor={theme.text.primary}
+            cursorColor={theme.text.link}
+            backgroundColor="transparent"
+            focusedBackgroundColor="transparent"
+          />
+        </box>
+      </Row>
+
+      {/* ── Provider · model — left-aligned to input box ── */}
+      <box paddingLeft={leftPad + 1}>
+        <text fg={theme.text.dim}>{infoLine}</text>
+      </box>
+
+      {/* ── Commands hint — left-aligned to input box ── */}
+      <box paddingLeft={leftPad + 1}>
+        <text fg={theme.text.dim}>{'tab  sessions    /settings    /model    /provider'}</text>
+      </box>
+
+      {/* ── NFO sessions box ── */}
+      {nfoLines.length > 0 && (
+        <>
+          <box height={1} />
+          {nfoLines.map((line, i) => (
+            <Row key={i}>
+              <text fg={line.isBorder ? theme.border.normal : theme.text.secondary}>
+                {line.text}
+              </text>
+            </Row>
+          ))}
+        </>
+      )}
+
+      {/* ── Push bottom bar down ── */}
       <box flexGrow={1} />
 
-      {/* ── Bottom status bar: CWD:branch (left)   provider · model (right) ── */}
+      {/* ── Bottom status bar ── */}
       <box>
         <text fg={theme.text.dim}>{bottomBar.slice(0, columns)}</text>
       </box>
