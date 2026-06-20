@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { Text } from 'ink';
 
 const FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'] as const;
 
@@ -15,5 +14,5 @@ export const BrailleSpinner: React.FC<BrailleSpinnerProps> = ({ color }) => {
     return () => clearInterval(t);
   }, []);
 
-  return <Text color={color}>{FRAMES[frame]}</Text>;
+  return <text fg={color}>{FRAMES[frame]}</text>;
 };

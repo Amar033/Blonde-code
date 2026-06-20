@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
-import { Box, Text, useInput } from 'ink';
-import TextInput from 'ink-text-input';
+import { useKeyboard } from '@opentui/react';
 import { theme } from '../theme.js';
 
 const COMMANDS = [
@@ -21,7 +20,7 @@ interface CommandPaletteProps {
 }
 
 export const CommandPalette: React.FC<CommandPaletteProps> = ({ onSelect, onClose }) => {
-  const [query, setQuery] = useState('');
+  const [query,  setQuery]  = useState('');
   const [cursor, setCursor] = useState(0);
 
   const filtered = COMMANDS.filter(c =>
@@ -29,11 +28,11 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ onSelect, onClos
   );
   const clamp = Math.max(0, Math.min(cursor, filtered.length - 1));
 
-  useInput((char, key) => {
-    if (key.escape) { onClose(); return; }
-    if (key.upArrow)   { setCursor(c => Math.max(0, c - 1)); return; }
-    if (key.downArrow) { setCursor(c => Math.min(filtered.length - 1, c + 1)); return; }
-    if (key.return) {
+  useKeyboard((key) => {
+    if (key.name === 'escape')  { onClose(); return; }
+    if (key.name === 'up')      { setCursor(c => Math.max(0, c - 1)); return; }
+    if (key.name === 'down')    { setCursor(c => Math.min(filtered.length - 1, c + 1)); return; }
+    if (key.name === 'return')  {
       const cmd = filtered[clamp];
       if (cmd) { onSelect(cmd.name); }
       onClose();
@@ -41,39 +40,43 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ onSelect, onClos
   });
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={theme.border.active} marginTop={1}>
-      <Box paddingX={1} gap={1}>
-        <Text color={theme.text.dim}>{'>'}</Text>
-        <TextInput
+    <box flexDirection="column" borderStyle="rounded" borderColor={theme.border.active} marginTop={1}>
+      <box paddingLeft={1} paddingRight={1} gap={1}>
+        <text fg={theme.text.dim}>{'>'}</text>
+        <input
           value={query}
-          onChange={v => { setQuery(v); setCursor(0); }}
+          onInput={(v: string) => { setQuery(v); setCursor(0); }}
           onSubmit={() => {
             const cmd = filtered[clamp];
             if (cmd) onSelect(cmd.name);
             onClose();
           }}
           placeholder="search commands…"
-          focus
+          width={40}
+          textColor={theme.text.primary}
+          cursorColor={theme.text.link}
         />
-      </Box>
-      <Box paddingX={1}>
-        <Text color={theme.border.subtle}>{'─'.repeat(28)}</Text>
-      </Box>
+      </box>
+      <box paddingLeft={1} paddingRight={1}>
+        <text fg={theme.border.subtle}>{'─'.repeat(28)}</text>
+      </box>
       {filtered.length === 0 ? (
-        <Box paddingX={1} paddingBottom={1}>
-          <Text color={theme.text.dim}>no commands match</Text>
-        </Box>
+        <box paddingLeft={1} paddingBottom={1}>
+          <text fg={theme.text.dim}>no commands match</text>
+        </box>
       ) : (
         filtered.map((cmd, i) => {
           const sel = i === clamp;
           return (
-            <Box key={cmd.name} paddingX={1} gap={2}>
-              <Text color={sel ? theme.role.user : theme.text.link} bold={sel}>{cmd.name}</Text>
-              <Text color={theme.text.dim}>{cmd.desc}</Text>
-            </Box>
+            <box key={cmd.name} paddingLeft={1} paddingRight={1} gap={2}>
+              <text fg={sel ? theme.role.user : theme.text.link}>
+                {sel ? <strong>{cmd.name}</strong> : cmd.name}
+              </text>
+              <text fg={theme.text.dim}>{cmd.desc}</text>
+            </box>
           );
         })
       )}
-    </Box>
+    </box>
   );
 };

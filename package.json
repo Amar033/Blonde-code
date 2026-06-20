@@ -9,7 +9,7 @@
     "dev": "tsx src/main.ts",
     "start": "node dist/main.js",
     "tui": "tsx src/ui/run-tui.tsx",
-    "agent": "tsx src/ui/run.tsx"
+    "agent": "bun src/ui/run.tsx"
   },
   "keywords": [
     "agent",
@@ -27,7 +27,9 @@
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",
-    "@types/react": "^19.2.14",
+    "@opentui/core": "^0.4.1",
+    "@opentui/react": "^0.4.1",
+    "@types/react": "^18.3.18",
     "@types/turndown": "^5.0.6",
     "dotenv": "^17.2.3",
     "ink": "^6.7.0",

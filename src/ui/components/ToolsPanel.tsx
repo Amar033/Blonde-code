@@ -1,5 +1,4 @@
 import React from 'react';
-import { Box, Text } from 'ink';
 import { theme } from '../theme.js';
 import { BrailleSpinner } from './BrailleSpinner.js';
 
@@ -22,29 +21,31 @@ export const ToolsPanel: React.FC<ToolsPanelProps> = ({ tools, focused, height }
   const visible = tools.slice(-maxItems);
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={borderColor} height={height} overflow="hidden">
-      <Box paddingX={1}>
-        <Text color={theme.text.secondary} bold>Tools</Text>
-      </Box>
+    <box
+      flexDirection="column"
+      borderStyle="single"
+      borderColor={borderColor}
+      title=" Tools "
+      titleColor={theme.text.secondary}
+      height={height}
+    >
       {visible.length === 0 ? (
-        <Box paddingX={1} paddingBottom={1}>
-          <Text color={theme.text.dim}>no tools called</Text>
-        </Box>
+        <text fg={theme.text.dim}>  no tools called</text>
       ) : (
         visible.map(t => (
-          <Box key={t.id} paddingX={1} gap={1}>
+          <box key={t.id} paddingLeft={1} paddingRight={1} gap={1}>
             {t.status === 'running'
               ? <BrailleSpinner color={theme.status.running} />
               : t.status === 'done'
-              ? <Text color={theme.status.success}>✓</Text>
-              : <Text color={theme.status.error}>✗</Text>}
-            <Text color={theme.text.secondary}>{t.name}</Text>
+              ? <text fg={theme.status.success}>✓</text>
+              : <text fg={theme.status.error}>✗</text>}
+            <text fg={theme.text.secondary}>{t.name}</text>
             {t.ms !== undefined && t.status !== 'running' && (
-              <Text color={theme.text.dim}>{t.ms}ms</Text>
+              <text fg={theme.text.dim}>{t.ms}ms</text>
             )}
-          </Box>
+          </box>
         ))
       )}
-    </Box>
+    </box>
   );
 };

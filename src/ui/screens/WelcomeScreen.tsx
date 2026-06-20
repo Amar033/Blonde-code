@@ -1,21 +1,22 @@
-import React, { useState, useEffect } from 'react';
-import { Box, Text } from 'ink';
-import TextInput from 'ink-text-input';
+import React, { useState, useEffect, useRef } from 'react';
+import { useKeyboard } from '@opentui/react';
 import { execSync } from 'child_process';
 import { SessionManager, type Session } from '../../sessions/session-manager.js';
-import { AppHeader } from '../components/AppHeader.js';
-import { BrandMark, LOGO_OPTIONS } from '../components/BrandMark.js';
+import { LOGO_OPTIONS } from '../components/BrandMark.js';
 import { providerRegistry } from '../../planner/provider-registry.js';
 import { loadUiConfig, saveUiConfig } from '../../services/ui-config.js';
+import { brandArtFor, getUsername, pickGreeting } from '../brand.js';
+import { theme } from '../theme.js';
+import os from 'os';
+import fs from 'fs';
+import path from 'path';
 
 function getGitBranch(): string | null {
   try {
     return execSync('git rev-parse --abbrev-ref HEAD', {
       stdio: ['ignore', 'pipe', 'ignore'],
     }).toString().trim();
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
 function fmtDate(iso: string): string {
@@ -27,6 +28,13 @@ function fmtDate(iso: string): string {
   if (days < 7)  return `${days}d ago`;
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
+
+function centre(s: string, width: number): string {
+  const pad = Math.max(0, Math.floor((width - s.length) / 2));
+  return ' '.repeat(pad) + s;
+}
+
+const CWD = process.cwd().replace(os.homedir(), '~');
 
 interface WelcomeScreenProps {
   columns:        number;
@@ -43,16 +51,15 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
   onShowSessions,
   onShowSettings,
 }) => {
-  const [task,           setTask]           = useState('');
-  const [statusMsg,      setStatusMsg]      = useState('');
-  const [model,          setModel]          = useState(process.env.LLM_MODEL || 'qwen3.5:latest');
-  const [provider,       setProvider]       = useState(process.env.LLM_PROVIDER || 'ollama');
-  const [recent,         setRecent]         = useState<Session[]>([]);
-  const [gitBranch]                         = useState<string | null>(getGitBranch);
-  const [logoIndex,      setLogoIndex]      = useState<number | undefined>(undefined);
-  const [bannerOverride, setBannerOverride] = useState<string | undefined>(undefined);
-
-  const bannerWidth = 32;
+  const [task,      setTask]      = useState('');
+  const [statusMsg, setStatusMsg] = useState('');
+  const [model,     setModel]     = useState(process.env.LLM_MODEL || 'qwen3.5:latest');
+  const [provider,  setProvider]  = useState(process.env.LLM_PROVIDER || 'ollama');
+  const [recent,    setRecent]    = useState<Session[]>([]);
+  const [gitBranch]               = useState<string | null>(getGitBranch);
+  const [customArt, setCustomArt] = useState<string[] | undefined>();
+  const [greeting,  setGreeting]  = useState('');
+  const inputRef = useRef<any>(null);
 
   useEffect(() => {
     const mgr = new SessionManager();
@@ -61,99 +68,82 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
       .then(sessions => setRecent(sessions.slice(0, 5)))
       .catch(() => {});
 
-    // Load persisted banner
-    loadUiConfig().then(cfg => {
-      if (cfg.banner) setBannerOverride(cfg.banner);
-    }).catch(() => {});
-
-    // Reflect active registry provider on mount
     providerRegistry.getActive().then(active => {
       if (active) {
         setProvider(`${active.type}:${active.name}`);
         setModel(active.model);
       }
     }).catch(() => {});
+
+    loadUiConfig().then(cfg => {
+      if (cfg.brandArt && cfg.brandArt.length > 0) setCustomArt(cfg.brandArt);
+    }).catch(() => {});
+
+    const name = getUsername();
+    setGreeting(pickGreeting(name));
   }, []);
+
+  const divider = '─'.repeat(Math.max(0, columns - 4));
+
+  // ── Centered input box width (65% of terminal, like OpenCode) ──────────────
+  const inputWidth   = Math.min(columns - 8, Math.max(40, Math.floor(columns * 0.65)));
+  const inputLeftPad = Math.floor((columns - inputWidth) / 2);
+
+  // ── Sessions block width (matches input box) ───────────────────────────────
+  const blockWidth = inputWidth;
+
+  // ── Bottom bar: CWD:branch (left)   provider · model (right) ──────────────
+  const leftBar  = `  ${CWD}${gitBranch ? `:${gitBranch}` : ''}`;
+  const rightBar = `${provider}  ·  ${model}  `;
+  const barPad   = Math.max(1, columns - leftBar.length - rightBar.length);
+  const bottomBar = leftBar + ' '.repeat(barPad) + rightBar;
 
   const handleSubmit = () => {
     const v = task.trim();
     if (!v) return;
     setTask('');
+    if (inputRef.current) inputRef.current.value = '';
 
-    if (v === '/sessions' || v === 'sessions') { onShowSessions(); return; }
-    if (v === '/settings' || v === 'settings') { onShowSettings(); return; }
+    if (v === '/sessions' || v === 'sessions')  { onShowSessions(); return; }
+    if (v === '/settings' || v === 'settings')  { onShowSettings(); return; }
 
     if (v === '/model' || v === '/models') {
-      import('../../planner/providers/ollama.js').then(async ({ OllamaProvider, findOllamaModelsDirs }: any) => {
-        const p = new OllamaProvider(model, process.env.OLLAMA_BASE_URL || 'http://localhost:11434');
-        const [models, dirs] = await Promise.all([p.listModels(), findOllamaModelsDirs()]);
-        const modelsDir = dirs[0]?.path ?? '~/.ollama/models';
-        setStatusMsg([
-          `current: ${model}`,
-          models.length ? `available: ${models.join(', ')}` : 'no models found',
-          `dir: ${modelsDir}`,
-          '/model <name> to switch',
-        ].join('  ·  '));
-      }).catch(() => setStatusMsg(`current: ${model} (${provider})`));
+      setStatusMsg(`current: ${model}  ·  ${provider}  ·  /model <name> to switch`);
       return;
     }
-
     if (v.startsWith('/model ')) {
       const m = v.slice(7).trim();
-      if (m) {
-        process.env.LLM_MODEL = m;
-        setModel(m);
-        setStatusMsg(`model set to ${m} — applies to next session`);
-      }
+      if (m) { process.env.LLM_MODEL = m; setModel(m); setStatusMsg(`model → ${m}`); }
       return;
     }
 
     if (v === '/logo' || v === '/logos') {
-      const list = LOGO_OPTIONS.map(o => `/logo ${o.index} — ${o.label}`).join('  ·  ');
-      setStatusMsg(`logos: ${list}`);
+      setStatusMsg(`logos: ${LOGO_OPTIONS.map(o => `/logo ${o.index} — ${o.label}`).join('  ·  ')}`);
       return;
     }
-
     if (v.startsWith('/logo ')) {
       const n = parseInt(v.slice(6).trim(), 10);
       const opt = LOGO_OPTIONS.find(o => o.index === n);
-      if (opt) {
-        setLogoIndex(n);
-        setBannerOverride(undefined);
-        setStatusMsg(`logo set to ${n} (${opt.label})`);
-      } else {
-        setStatusMsg(`unknown logo — try /logo 1, /logo 2, or /logo 3`);
-      }
+      setStatusMsg(opt ? `logo style ${n} (${opt.label})` : 'unknown logo — try /logo 1, /logo 2, /logo 3');
       return;
     }
 
     if (v === '/banner') {
-      setStatusMsg('usage: /banner <path>  (supports .png .jpg .gif — ~/... paths ok)  ·  /banner clear to reset');
+      setStatusMsg('usage: /banner <path>  ·  /banner clear to reset');
       return;
     }
-
     if (v === '/banner clear' || v === '/banner reset') {
-      setBannerOverride(undefined);
-      setLogoIndex(undefined);
       saveUiConfig({ banner: undefined }).catch(() => {});
-      setStatusMsg('banner reset to default');
+      setStatusMsg('banner reset');
       return;
     }
-
     if (v.startsWith('/banner ')) {
-      const p = v.slice(8).trim();
-      if (p) {
-        import('fs').then(({ default: fs }) => {
-          const resolved = p.replace(/^~/, process.env.HOME ?? '');
-          if (fs.existsSync(resolved)) {
-            setBannerOverride(resolved);
-            setLogoIndex(undefined);
-            saveUiConfig({ banner: resolved }).catch(() => {});
-            setStatusMsg(`banner set to ${p} (saved)`);
-          } else {
-            setStatusMsg(`file not found: ${p}`);
-          }
-        });
+      const p = v.slice(8).trim().replace(/^~/, os.homedir());
+      if (fs.existsSync(p)) {
+        saveUiConfig({ banner: p }).catch(() => {});
+        setStatusMsg(`banner → ${path.basename(p)} (Kitty required for display)`);
+      } else {
+        setStatusMsg(`file not found: ${p}`);
       }
       return;
     }
@@ -161,121 +151,137 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
     if (v === '/provider' || v === '/providers') {
       providerRegistry.list().then(providers => {
         if (providers.length === 0) {
-          setStatusMsg('no providers registered — add one with: /provider add <name> <type> <apiKey|-> [model]');
+          setStatusMsg('no providers — /provider add <name> <type> <key> [model]');
         } else {
-          const parts = providers.map(p =>
-            `${p.isActive ? '✓ ' : ''}${p.name} (${p.type}) ${p.model}`
-          );
-          setStatusMsg(parts.join('  ·  ') + '  ·  /provider <name> to switch');
+          setStatusMsg(providers.map(p => `${p.isActive ? '✓ ' : ''}${p.name} (${p.type}) ${p.model}`).join('  ·  '));
         }
       }).catch(() => setStatusMsg('could not load providers'));
       return;
     }
-
     if (v.startsWith('/provider ')) {
       const name = v.slice(10).trim();
-      if (name) {
-        providerRegistry.setActive(name).then(ok => {
-          if (!ok) {
-            setStatusMsg(`provider "${name}" not found — use /provider to list registered providers`);
-          } else {
-            providerRegistry.get(name).then(entry => {
-              if (entry) {
-                setProvider(`${entry.type}:${entry.name}`);
-                setModel(entry.model);
-                process.env.LLM_PROVIDER = entry.type;
-                process.env.LLM_MODEL    = entry.model;
-                setStatusMsg(`switched to provider "${name}" (${entry.type}) — applies to next session`);
-              }
-            }).catch(() => {});
+      providerRegistry.setActive(name).then(ok => {
+        if (!ok) { setStatusMsg(`provider "${name}" not found`); return; }
+        providerRegistry.get(name).then((entry: any) => {
+          if (entry) {
+            setProvider(`${entry.type}:${entry.name}`);
+            setModel(entry.model);
+            process.env.LLM_PROVIDER = entry.type;
+            process.env.LLM_MODEL    = entry.model;
+            setStatusMsg(`provider → ${name} (${entry.type})`);
           }
-        }).catch(() => setStatusMsg('failed to switch provider'));
-      }
+        }).catch(() => {});
+      }).catch(() => setStatusMsg('failed to switch provider'));
       return;
     }
 
     onStart(v);
   };
 
+  useKeyboard((key) => {
+    if (key.name === 'escape') { setTask(''); if (inputRef.current) inputRef.current.value = ''; }
+  });
+
+  // Build session rows as single strings (no two-<text> wrapping risk)
+  // Columns: name (left) · date (fixed 11 chars) · model (fixed 16 chars)
+  const dateW  = 11;
+  const modelW = 16;
+  const prefW  = 4; // "  ▸ "
+  const nameW  = Math.max(6, blockWidth - prefW - dateW - modelW - 4); // 4 for separators
+
+  const sessionLines = recent.map(s => {
+    const date  = fmtDate(s.updatedAt).padEnd(dateW);
+    const mdl   = (s.model || '—').slice(0, modelW).padEnd(modelW);
+    const name  = s.name.slice(0, nameW).padEnd(nameW);
+    return `  ▸ ${name}  ${date}  ${mdl}`;
+  });
+
+  // artRows: 7 wide / 5 narrow + 1 subtitle + 1 divider + sessions
+  const artRows      = (columns >= 100 ? 7 : 5);
+  const contentRows  = 2 /* greeting+gap */ + artRows + 2 /* sub+div */ + (recent.length > 0 ? 1 + recent.length : 0) + 2 /* spacer */ + 3 /* input */ + 1 /* hints */ + 1 /* bar */;
+  const topPad       = Math.max(1, Math.min(6, Math.floor((rows - contentRows) / 3)));
+
   return (
-    <Box flexDirection="column" width={columns} height={rows}>
+    <box flexDirection="column" width={columns} height={rows}>
 
-      {/* ── Header ───────────────────────────────────────────── */}
-      <AppHeader model={model} provider={provider} branch={gitBranch} />
+      {/* ── Greeting (top-left, subtle) ── */}
+      <box paddingLeft={2}>
+        <text fg={theme.text.dim}>{greeting}</text>
+      </box>
 
-      {/* ── Body: fills all remaining vertical space ─────────── */}
-      <Box
-        flexDirection="row"
-        flexGrow={1}
-        borderStyle="single"
-        borderColor="#2a2a2a"
-        overflow="hidden"
-      >
-        {/* Left: banner */}
-        <BrandMark width={bannerWidth} logoIndex={logoIndex} bannerOverride={bannerOverride} />
+      {/* ── Top spacer ── */}
+      <box height={topPad} />
 
-        {/* Right: content */}
-        <Box flexDirection="column" flexGrow={1} paddingX={2} paddingY={1} gap={2}>
+      {/* ── ASCII brand art (centered) ── */}
+      {brandArtFor(columns, customArt).map((line, i) => (
+        <box key={i}>
+          <text fg={theme.brand}>{centre(line, columns)}</text>
+        </box>
+      ))}
 
-          <Box flexDirection="column">
-            <Text bold color="#e8e8e8">Welcome back</Text>
-            <Text color="#aaaaaa">Ask me to read, search, or edit your codebase.</Text>
-            <Text color="#555555">Be specific — like you would with a teammate.</Text>
-          </Box>
+      {/* ── Subtitle (centered, right below art) ── */}
+      <box marginTop={1}>
+        <text fg={theme.text.dim}>{centre('AI Coding Agent  ·  ask me to read, edit, search, or refactor', columns)}</text>
+      </box>
 
-          <Box flexDirection="column">
-            <Text bold color="#aaaaaa">Recent sessions</Text>
-            {recent.length === 0
-              ? <Text color="#555555">no sessions yet</Text>
-              : recent.map((s) => (
-                <Box key={s.id} gap={2}>
-                  <Text color="#4a9eff">{s.name.slice(0, 44)}</Text>
-                  <Text color="#555555">{fmtDate(s.updatedAt)}</Text>
-                  <Text color="#555555">{s.model}</Text>
-                </Box>
-              ))
-            }
-          </Box>
+      {/* ── Divider ── */}
+      <box marginTop={1}>
+        <text fg={theme.border.dim}>{'  '}{divider}</text>
+      </box>
 
-        </Box>
-      </Box>
-
-      {/* ── Status message ───────────────────────────────────── */}
-      {statusMsg && (
-        <Box paddingX={1} gap={1}>
-          <Text color="#4a9eff">!</Text>
-          <Text color="#aaaaaa">{statusMsg}</Text>
-        </Box>
+      {/* ── Recent sessions (centered block, top 5, name + date + model) ── */}
+      {recent.length > 0 && (
+        <box flexDirection="column" paddingTop={1}>
+          <box>
+            <text fg={theme.text.dim}>{centre('Recent', columns)}</text>
+          </box>
+          {sessionLines.map((line, i) => (
+            <box key={i}>
+              <text fg={theme.text.secondary}>{centre(line, columns)}</text>
+            </box>
+          ))}
+        </box>
       )}
 
-      {/* ── Hints ────────────────────────────────────────────── */}
-      <Box paddingX={1} gap={2}>
-        <Text color="#555555">/sessions</Text>
-        <Text color="#555555">·</Text>
-        <Text color="#555555">/settings</Text>
-        <Text color="#555555">·</Text>
-        <Text color="#555555">/model</Text>
-        <Text color="#555555">·</Text>
-        <Text color="#555555">/provider</Text>
-        <Text color="#555555">·</Text>
-        <Text color="#555555">/logo [1-3]</Text>
-        <Text color="#555555">·</Text>
-        <Text color="#555555">/banner &lt;path&gt;</Text>
-        <Text color="#555555">·</Text>
-        <Text color="#555555">Ctrl+K</Text>
-      </Box>
+      {/* ── Small spacer between sessions and input ── */}
+      <box height={2} />
 
-      {/* ── Input ────────────────────────────────────────────── */}
-      <Box borderStyle="round" borderColor="#4a9eff" paddingX={2}>
-        <Text color="#a78bfa">{'→ '}</Text>
-        <TextInput
+      {/* ── Input box — centered, 65% width ── */}
+      {statusMsg !== '' && (
+        <box paddingLeft={inputLeftPad}>
+          <text fg={theme.text.link}>{`! ${statusMsg.slice(0, inputWidth - 4)}`}</text>
+        </box>
+      )}
+      <box paddingLeft={inputLeftPad} borderStyle="rounded" borderColor={theme.border.active} paddingRight={1}>
+        <text fg={theme.role.assistant}>{'→ '}</text>
+        <input
+          ref={inputRef}
+          focused={true}
           value={task}
-          onChange={setTask}
-          onSubmit={handleSubmit}
+          onInput={(v: string) => setTask(v)}
+          onSubmit={() => handleSubmit()}
           placeholder="What can I help you build today?"
+          width={Math.max(20, inputWidth - 6)}
+          textColor={theme.text.primary}
+          cursorColor={theme.text.link}
+          backgroundColor="transparent"
+          focusedBackgroundColor="transparent"
         />
-      </Box>
+      </box>
 
-    </Box>
+      {/* ── Hints (centered) ── */}
+      <box>
+        <text fg={theme.text.dim}>{centre('/sessions  /settings  /model  /provider  /logo [1-3]', columns)}</text>
+      </box>
+
+      {/* ── Push bottom bar to bottom ── */}
+      <box flexGrow={1} />
+
+      {/* ── Bottom status bar: CWD:branch (left)   provider · model (right) ── */}
+      <box>
+        <text fg={theme.text.dim}>{bottomBar.slice(0, columns)}</text>
+      </box>
+
+    </box>
   );
 };

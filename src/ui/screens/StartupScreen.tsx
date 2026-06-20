@@ -1,78 +1,82 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Text } from 'ink';
-import { execSync } from 'child_process';
+import { useTerminalDimensions } from '@opentui/react';
 import { ensureSearXNG } from '../../services/searxng-manager.js';
-import { AppHeader } from '../components/AppHeader.js';
-import { BrailleSpinner } from '../components/BrailleSpinner.js';
+import { loadUiConfig } from '../../services/ui-config.js';
+import { brandArtFor, getUsername, pickGreeting } from '../brand.js';
 import { theme } from '../theme.js';
 
-// ── Grid animation ──────────────────────────────────────────────────────────
-
-const GRID_COLS = 8;
-const GRID_ROWS = 6;
-const SHADES = ['░', '▒', '▓'];
-
-function gridRow(tick: number, row: number, done: boolean): string {
-  if (done) return (SHADES[2] + ' ').repeat(GRID_COLS).trim();
-  let s = '';
-  for (let col = 0; col < GRID_COLS; col++) {
-    const phase = (col * 3 + row * 2 + tick) % 9;
-    s += SHADES[Math.floor(phase / 3)];
-    s += col < GRID_COLS - 1 ? ' ' : '';
-  }
-  return s;
-}
-
-// Row color cycles top-to-bottom, shifting with tick
-const ROW_COLORS = [
-  theme.text.dim,
-  theme.text.dim,
-  theme.text.secondary,
-  theme.brand,
-  theme.text.secondary,
-  theme.text.dim,
-];
-
-// ── Log line ────────────────────────────────────────────────────────────────
-
-interface LogLine {
-  text: string;
-  level: 'info' | 'ok' | 'warn' | 'error';
-}
-
-// ── Helpers ─────────────────────────────────────────────────────────────────
-
-function getGitBranch(): string | null {
+// ─── Try to get an AI greeting (short timeout, silent fallback) ───────────────
+async function fetchAiGreeting(name: string): Promise<string> {
   try {
-    return execSync('git rev-parse --abbrev-ref HEAD', {
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).toString().trim();
+    const baseUrl  = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
+    const model    = process.env.LLM_MODEL        || 'qwen3.5:latest';
+    const provider = process.env.LLM_PROVIDER    || 'ollama';
+
+    const isOllama = provider === 'ollama';
+    const isOpenAI = provider === 'openai' || provider === 'openai-compatible' || provider === 'lmstudio';
+    if (!isOllama && !isOpenAI) return '';
+
+    const ac  = new AbortController();
+    const tId = setTimeout(() => ac.abort(), 1200);
+    const prompt = `Write a very short (under 55 chars), warm, casual one-line greeting for ${name || 'a developer'} opening their AI coding assistant. Sound human, not robotic. Output ONLY the greeting, no quotes, no explanation.`;
+
+    let res: Response;
+    if (isOllama) {
+      res = await fetch(`${baseUrl}/api/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model, prompt, stream: false, options: { num_predict: 25, temperature: 0.9 } }),
+        signal: ac.signal,
+      });
+      clearTimeout(tId);
+      const data = await res.json() as any;
+      return ((data.response as string) || '').trim().replace(/^["']|["']$/g, '').slice(0, 80);
+    } else {
+      const apiBase = process.env.OPENAI_API_BASE || process.env.LMSTUDIO_BASE_URL || 'http://localhost:1234/v1';
+      res = await fetch(`${apiBase}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.OPENAI_API_KEY || 'lm-studio'}` },
+        body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], max_tokens: 30, temperature: 0.9 }),
+        signal: ac.signal,
+      });
+      clearTimeout(tId);
+      const data = await res.json() as any;
+      return ((data.choices?.[0]?.message?.content as string) || '').trim().replace(/^["']|["']$/g, '').slice(0, 80);
+    }
   } catch {
-    return null;
+    return '';
   }
 }
 
-// ── Component ────────────────────────────────────────────────────────────────
+interface LogLine { text: string; level: 'info' | 'ok' | 'warn' | 'error'; }
 
-interface StartupScreenProps {
-  onDone: () => void;
-}
+const DOTS = ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏'];
+
+interface StartupScreenProps { onDone: () => void; }
 
 export const StartupScreen: React.FC<StartupScreenProps> = ({ onDone }) => {
-  const [tick,    setTick]    = useState(0);
-  const [logs,    setLogs]    = useState<LogLine[]>([]);
-  const [done,    setDone]    = useState(false);
-  const [branch]              = useState<string | null>(getGitBranch);
-  const model    = process.env.LLM_MODEL    || 'qwen3.5:latest';
-  const provider = process.env.LLM_PROVIDER || 'ollama';
+  const { width: cols }           = useTerminalDimensions();
+  const [tick,      setTick]      = useState(0);
+  const [logs,      setLogs]      = useState<LogLine[]>([]);
+  const [done,      setDone]      = useState(false);
+  const [greeting,  setGreeting]  = useState('');
+  const [customArt, setCustomArt] = useState<string[] | undefined>();
 
-  // Animation tick
   useEffect(() => {
-    const id = setInterval(() => setTick(t => t + 1), 120);
+    const id = setInterval(() => setTick(t => t + 1), 100);
     return () => clearInterval(id);
   }, []);
 
-  // Run init
+  useEffect(() => {
+    const name = getUsername();
+    setGreeting(pickGreeting(name));
+    fetchAiGreeting(name).then(ai => { if (ai) setGreeting(ai); }).catch(() => {});
+    loadUiConfig().then(cfg => {
+      if (cfg.brandArt && cfg.brandArt.length > 0) setCustomArt(cfg.brandArt);
+      if (cfg.greeting) setGreeting(cfg.greeting);
+    }).catch(() => {});
+  }, []);
+
   useEffect(() => {
     const addLog = (text: string, level: LogLine['level'] = 'info') =>
       setLogs(prev => [...prev, { text, level }]);
@@ -80,119 +84,86 @@ export const StartupScreen: React.FC<StartupScreenProps> = ({ onDone }) => {
     ensureSearXNG(addLog)
       .then(result => {
         if (!result.ok) {
-          // Final fallback line only if no error was already logged
           setLogs(prev => {
-            const lastIsError = prev.length > 0 && (prev[prev.length - 1].level === 'error' || prev[prev.length - 1].level === 'warn');
-            if (lastIsError) return [...prev, { text: 'Falling back to DuckDuckGo', level: 'info' }];
+            const last = prev[prev.length - 1];
+            if (last && (last.level === 'error' || last.level === 'warn')) {
+              return [...prev, { text: 'Falling back to DuckDuckGo', level: 'info' }];
+            }
             return prev;
           });
         }
         setDone(true);
-        setTimeout(onDone, 900);
+        setTimeout(onDone, 600);
       })
       .catch(() => {
         addLog('Search init failed — using DuckDuckGo', 'warn');
         setDone(true);
-        setTimeout(onDone, 900);
+        setTimeout(onDone, 600);
       });
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const gridRows = Array.from({ length: GRID_ROWS }, (_, r) => gridRow(tick, r, done));
-  const rowColors = done
-    ? Array(GRID_ROWS).fill(theme.status.success)
-    : ROW_COLORS.map((_, i) => ROW_COLORS[(i + GRID_ROWS - (tick % GRID_ROWS)) % GRID_ROWS]);
+  const centre = (s: string) => {
+    const p = Math.max(0, Math.floor((cols - s.length) / 2));
+    return ' '.repeat(p) + s;
+  };
+
+  const divider = '─'.repeat(Math.max(0, cols - 4));
 
   return (
-    <Box flexDirection="column">
-      <AppHeader model={model} provider={provider} branch={branch} />
+    <box flexDirection="column" width={cols}>
 
-      <Box
-        flexDirection="row"
-        borderStyle="single"
-        borderColor={theme.border.dim}
-        paddingX={2}
-        paddingY={1}
-        gap={4}
-      >
-        {/* ── Left: animated grid ─────────────────────────────── */}
-        <Box flexDirection="column" width={22} gap={1}>
-          <Box flexDirection="column">
-            <Text bold color={theme.brand}>◆ Blonde</Text>
-            <Text color={theme.text.dim}>AI Coding Agent</Text>
-          </Box>
+      {/* ── Vertical padding above brand art ── */}
+      <box height={3} />
 
-          <Box flexDirection="column" marginTop={1}>
-            {gridRows.map((row, i) => (
-              <Text key={i} color={rowColors[i]}>{row}</Text>
-            ))}
-          </Box>
+      {/* ── ASCII brand art (centered) ── */}
+      {brandArtFor(cols, customArt).map((line, i) => (
+        <box key={i}>
+          <text fg={theme.brand}>{centre(line)}</text>
+        </box>
+      ))}
 
-          <Box marginTop={1}>
-            {done
-              ? <Text color={theme.status.success}>✓ Ready</Text>
-              : <Box gap={1}><BrailleSpinner color={theme.brand} /><Text color={theme.text.dim}>Starting</Text></Box>
-            }
-          </Box>
-        </Box>
+      {/* ── Greeting (centered) ── */}
+      <box marginTop={1}>
+        <text fg={theme.text.secondary}>{centre(greeting)}</text>
+      </box>
 
-        {/* ── Right: log panel ────────────────────────────────── */}
-        <Box flexDirection="column" flexGrow={1}>
+      {/* ── Divider ── */}
+      <box marginTop={2}>
+        <text fg={theme.border.dim}>{'  '}{divider}</text>
+      </box>
 
-          {/* Header */}
-          <Box gap={2} marginBottom={1}>
-            <Text bold color={theme.text.secondary}>
-              {done ? '✓ Initialization complete' : 'Initializing'}
-            </Text>
-            {!done && <BrailleSpinner color={theme.text.dim} />}
-          </Box>
+      {/* ── Status lines — each is ONE centered <text>, never two ── */}
+      <box marginTop={1}>
+        {logs.length === 0 ? (
+          <text fg={theme.brand}>{centre(`${DOTS[tick % DOTS.length]}  Starting up…`)}</text>
+        ) : null}
+      </box>
 
-          <Text color={theme.border.dim}>{'─'.repeat(48)}</Text>
+      {logs.map((line, i) => {
+        const isActive = i === logs.length - 1 && !done;
+        const sp   = DOTS[tick % DOTS.length];
+        const icon = isActive           ? sp
+                   : line.level === 'ok'    ? '✓'
+                   : line.level === 'warn'  ? '⚠'
+                   : line.level === 'error' ? '✗' : '·';
+        const fg   = isActive           ? theme.brand
+                   : line.level === 'ok'    ? theme.status.success
+                   : line.level === 'warn'  ? theme.status.warning
+                   : line.level === 'error' ? theme.status.error
+                   : theme.text.dim;
+        return (
+          <box key={i}>
+            <text fg={fg}>{centre(`${icon}  ${line.text}`)}</text>
+          </box>
+        );
+      })}
 
-          {/* Log lines */}
-          <Box flexDirection="column" marginTop={1} gap={0}>
-            {logs.length === 0
-              ? <Text color={theme.text.dim}>Starting up...</Text>
-              : logs.map((line, i) => {
-                  const isActive = i === logs.length - 1 && !done;
-                  const icon =
-                    line.level === 'ok'    ? '✓' :
-                    line.level === 'warn'  ? '⚠' :
-                    line.level === 'error' ? '✗' : '·';
-                  const iconColor =
-                    line.level === 'ok'    ? theme.status.success :
-                    line.level === 'warn'  ? theme.status.warning :
-                    line.level === 'error' ? theme.status.error :
-                    theme.text.dim;
-                  const textColor = isActive ? theme.text.secondary : theme.text.dim;
+      {done && (
+        <box marginTop={1}>
+          <text fg={theme.status.success}>{centre('◆  Ready')}</text>
+        </box>
+      )}
 
-                  return (
-                    <Box key={i} gap={1}>
-                      {isActive
-                        ? <BrailleSpinner color={theme.brand} />
-                        : <Text color={iconColor}>{icon}</Text>
-                      }
-                      <Text color={textColor}>{line.text}</Text>
-                    </Box>
-                  );
-                })
-            }
-          </Box>
-
-          {/* Done footer */}
-          {done && (
-            <Box marginTop={1} gap={1}>
-              <Text color={theme.status.success}>◆</Text>
-              <Text color={theme.text.secondary}>Launching Blonde...</Text>
-            </Box>
-          )}
-
-        </Box>
-      </Box>
-
-      {/* Bottom hint */}
-      <Box paddingX={1} marginTop={0}>
-        <Text color={theme.text.dim}>Setting up your workspace</Text>
-      </Box>
-    </Box>
+    </box>
   );
 };

@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Box, Text } from 'ink';
 import { spawn } from 'child_process';
 import type { ChildProcess } from 'child_process';
 
@@ -58,24 +57,24 @@ export const ProcessStream: React.FC<ProcessStreamProps> = ({ command, args, env
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <Box flexDirection="column" borderStyle="single" borderColor="#2a2a2a" paddingX={1} marginTop={1}>
-      <Text color="#444444" dimColor>output</Text>
+    <box flexDirection="column" borderStyle="single" borderColor="#2a2a2a" paddingLeft={1} paddingRight={1} marginTop={1}>
+      <text fg="#444444">output</text>
       {lines.length === 0 && exitCode === null && (
-        <Text color="#555555">starting…</Text>
+        <text fg="#555555">starting…</text>
       )}
       {lines.map((l, i) => (
-        <Text key={i} color={l.isErr ? '#f87171' : '#888888'}>{l.text}</Text>
+        <text key={i} fg={l.isErr ? '#f87171' : '#888888'}>{l.text}</text>
       ))}
       {exitCode !== null && (
-        <Box marginTop={1} gap={2}>
-          <Text color={exitCode === 0 ? '#22c55e' : '#ef4444'} bold>
-            {exitCode === 0 ? '✓' : '✗'}
-          </Text>
-          <Text color={exitCode === 0 ? '#22c55e' : '#ef4444'}>
+        <box marginTop={1} gap={2}>
+          <text fg={exitCode === 0 ? '#22c55e' : '#ef4444'}>
+            <strong>{exitCode === 0 ? '✓' : '✗'}</strong>
+          </text>
+          <text fg={exitCode === 0 ? '#22c55e' : '#ef4444'}>
             {exitCode === 0 ? 'completed successfully' : `failed (exit ${exitCode})`}
-          </Text>
-        </Box>
+          </text>
+        </box>
       )}
-    </Box>
+    </box>
   );
 };

@@ -1,11 +1,10 @@
 import React, { useState } from 'react';
-import { Box } from 'ink';
 import { WelcomeScreen } from './screens/WelcomeScreen.js';
 import { UnifiedSession } from './screens/UnifiedSession.js';
 import { SessionsScreen } from './screens/SessionsScreen.js';
 import { StartupScreen } from './screens/StartupScreen.js';
 import { SettingsScreen } from './screens/SettingsScreen.js';
-import { useTerminalSize } from './hooks/useTerminalSize.js';
+import { useTerminalDimensions } from '@opentui/react';
 import type { Session } from '../sessions/session-manager.js';
 
 type Screen = 'startup' | 'welcome' | 'session' | 'sessions-list' | 'settings';
@@ -20,7 +19,7 @@ export const App: React.FC<AppProps> = ({ mockMode }) => {
     mockMode ? 'Build a FastAPI backend with SQLite database' : undefined
   );
   const [resumeSession, setResumeSession] = useState<Session | undefined>();
-  const { columns, rows } = useTerminalSize();
+  const { width: columns, height: rows } = useTerminalDimensions();
 
   const handleStart = (task: string) => {
     setInitialTask(task);
@@ -41,7 +40,7 @@ export const App: React.FC<AppProps> = ({ mockMode }) => {
   };
 
   return (
-    <Box width={columns} height={rows} flexDirection="column" overflow="hidden">
+    <box width={columns} height={rows} flexDirection="column">
       {screen === 'startup' && (
         <StartupScreen onDone={() => setScreen('welcome')} />
       )}
@@ -69,6 +68,6 @@ export const App: React.FC<AppProps> = ({ mockMode }) => {
           onShowSessions={() => setScreen('sessions-list')}
         />
       )}
-    </Box>
+    </box>
   );
 };

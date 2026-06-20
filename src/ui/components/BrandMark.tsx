@@ -1,82 +1,49 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Box, Text } from 'ink';
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { theme } from '../theme.js';
 
-const __dirname  = path.dirname(fileURLToPath(import.meta.url));
-const ASSETS_DIR = path.resolve(__dirname, '../../../assets');
-
 export const LOGO_OPTIONS = [
-  { index: 1, label: 'starburst',  file: 'cerekin-logo-1.png' },
-  { index: 2, label: 'eyes',       file: 'cerekin-logo-2.png' },
-  { index: 3, label: 'brain',      file: 'cerekin-logo-3.png' },
+  { index: 1, label: 'grid',    desc: 'animated block grid' },
+  { index: 2, label: 'diamond', desc: 'diamond pattern' },
+  { index: 3, label: 'minimal', desc: 'minimal text art' },
 ];
 
-function resolvePath(logoIndex?: number, bannerOverride?: string): string | null {
-  if (bannerOverride) {
-    const resolved = bannerOverride.replace(/^~/, os.homedir());
-    if (fs.existsSync(resolved)) return resolved;
+// ─── Logo art definitions ────────────────────────────────────────────────────
+
+// Block grid rows (phase shifts the shade pattern for animation)
+function gridRow(width: number, row: number, phase: number): string {
+  const shades = ['░', '▒', '▓'];
+  let s = '';
+  for (let c = 0; c < Math.floor(width / 2); c++) {
+    s += shades[Math.abs(c * 3 + row * 2 + phase) % 3];
+    if (c < Math.floor(width / 2) - 1) s += ' ';
   }
-  if (logoIndex !== undefined) {
-    const opt = LOGO_OPTIONS.find(o => o.index === logoIndex);
-    if (opt) {
-      const p = path.join(ASSETS_DIR, opt.file);
-      if (fs.existsSync(p)) return p;
+  return s.slice(0, width);
+}
+
+// Diamond pattern (static)
+function diamondArt(width: number, height: number): string[] {
+  const rows: string[] = [];
+  const cx = Math.floor(width / 2);
+  const cy = Math.floor(height / 2);
+  const maxR = Math.min(cx, cy) - 1;
+  for (let r = 0; r < height; r++) {
+    let line = '';
+    for (let c = 0; c < width; c++) {
+      const dx = Math.abs(c - cx);
+      const dy = Math.abs(r - cy);
+      const dist = dx + dy;
+      if (dist === 0)       line += '◆';
+      else if (dist === 1)  line += '◇';
+      else if (dist <= 3)   line += '·';
+      else if (dist % maxR === 0) line += '◦';
+      else                  line += ' ';
     }
+    rows.push(line);
   }
-  const envPath = process.env.BLONDE_BANNER;
-  if (envPath) {
-    const resolved = envPath.replace(/^~/, os.homedir());
-    if (fs.existsSync(resolved)) return resolved;
-  }
-  const def = path.join(ASSETS_DIR, 'blonde-banner.png');
-  if (fs.existsSync(def)) return def;
-  return null;
+  return rows;
 }
 
-// Upscale with sharp then render via terminal-image for each frame.
-// Returns all ANSI frame strings + per-frame delay in ms.
-async function loadFrames(
-  filePath: string,
-  width: number,
-  height: number,
-): Promise<{ frames: string[]; delays: number[] }> {
-  const [{ default: sharp }, { default: ti }] = await Promise.all([
-    import('sharp'),
-    import('terminal-image'),
-  ]);
-
-  const isGif = filePath.toLowerCase().endsWith('.gif');
-
-  // Read total frame count
-  const meta = await sharp(filePath, { animated: false }).metadata();
-  const frameCount = isGif ? (meta.pages ?? 1) : 1;
-
-  // GIF stores delay in hundredths-of-a-second; sharp surfaces it in ms already
-  const rawDelays: number[] = Array.isArray((meta as any).delay)
-    ? (meta as any).delay
-    : [];
-
-  const frames: string[] = [];
-  const delays: number[] = [];
-
-  for (let i = 0; i < frameCount; i++) {
-    // Upscale 8× before handing to terminal-image — gives it more detail to downsample
-    const buf = await sharp(filePath, { animated: false, page: i })
-      .resize(width * 8, height * 8, { kernel: 'lanczos3', fit: 'fill' })
-      .png()
-      .toBuffer();
-
-    const ansi = await ti.buffer(buf, { width, height, preserveAspectRatio: false });
-    frames.push(ansi);
-    delays.push(rawDelays[i] ?? 80);
-  }
-
-  return { frames, delays };
-}
+// ─── Component ───────────────────────────────────────────────────────────────
 
 interface BrandMarkProps {
   width?:          number;
@@ -84,74 +51,94 @@ interface BrandMarkProps {
   bannerOverride?: string;
 }
 
-export const BrandMark: React.FC<BrandMarkProps> = ({ width = 32, logoIndex, bannerOverride }) => {
-  const [frames,   setFrames]   = useState<string[]>([]);
-  const [frameIdx, setFrameIdx] = useState(0);
-  const [ready,    setReady]    = useState(false);
-  const delaysRef = useRef<number[]>([]);
-  const timerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+export const BrandMark: React.FC<BrandMarkProps> = ({ width = 32, logoIndex }) => {
+  const [phase, setPhase] = useState(0);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Terminal chars are ~2:1 tall:wide → halve rows to get a square block
-  const height = Math.round(width / 2);
+  const height = Math.max(8, Math.round(width / 2));
+  const style  = logoIndex ?? 1;
 
+  // Animate grid logo
   useEffect(() => {
-    setFrames([]);
-    setFrameIdx(0);
-    setReady(false);
-    if (timerRef.current) clearTimeout(timerRef.current);
+    if (style !== 1) return;
+    timerRef.current = setInterval(() => setPhase(p => (p + 1) % 9), 160);
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, [style]);
 
-    const bannerPath = resolvePath(logoIndex, bannerOverride);
-    if (!bannerPath) { setReady(true); return; }
+  const SHADES_COLORS = [theme.text.dim, theme.text.secondary, theme.brand];
 
-    loadFrames(bannerPath, width, height)
-      .then(({ frames: f, delays: d }) => {
-        delaysRef.current = d;
-        setFrames(f);
-        setReady(true);
-      })
-      .catch(() => setReady(true));
-
-    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
-  }, [logoIndex, bannerOverride, width, height]);
-
-  // Animate GIFs — schedule next frame after the per-frame delay
-  useEffect(() => {
-    if (frames.length <= 1) return;
-
-    const schedule = (idx: number) => {
-      const delay = delaysRef.current[idx] ?? 80;
-      timerRef.current = setTimeout(() => {
-        const next = (idx + 1) % frames.length;
-        setFrameIdx(next);
-        schedule(next);
-      }, delay);
-    };
-
-    schedule(frameIdx);
-    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
-  }, [frames]);   // only re-attach when frames array changes
-
-  if (!ready) {
+  // ── Logo 1: animated block grid ─────────────────────────────────────────
+  if (style === 1) {
+    const midRow = Math.floor(height / 2);
     return (
-      <Box width={width} height={height} justifyContent="center" alignItems="center">
-        <Text color={theme.brand}>◆</Text>
-      </Box>
+      <box flexDirection="column" width={width} height={height}>
+        {Array.from({ length: height }, (_, r) => {
+          const shades = ['░', '▒', '▓'];
+          const cells  = Math.floor(width / 2);
+          let text = '';
+          for (let c = 0; c < cells; c++) {
+            text += shades[Math.abs(c * 3 + r * 2 + phase) % 3];
+            if (c < cells - 1) text += ' ';
+          }
+          text = text.slice(0, width);
+
+          const isTitle   = r === midRow - 1;
+          const isSub     = r === midRow;
+          const isVersion = r === midRow + 1;
+          const phaseOff  = (r + phase) % 3;
+          const color     = SHADES_COLORS[phaseOff];
+
+          if (isTitle)   return <text key={r} fg={theme.brand}><strong>◆ Blonde</strong></text>;
+          if (isSub)     return <text key={r} fg={theme.text.secondary}>  AI Coding Agent</text>;
+          if (isVersion) return <text key={r} fg={theme.text.dim}>  v0.1.0</text>;
+          return <text key={r} fg={color}>{text}</text>;
+        })}
+      </box>
     );
   }
 
-  if (frames.length > 0) {
+  // ── Logo 2: diamond pattern ──────────────────────────────────────────────
+  if (style === 2) {
+    const rows = diamondArt(width, height);
+    const mid  = Math.floor(height / 2);
     return (
-      <Box flexDirection="column" width={width} height={height} overflow="hidden">
-        <Text>{frames[frameIdx]}</Text>
-      </Box>
+      <box flexDirection="column" width={width} height={height}>
+        {rows.map((row, r) => {
+          const dist   = Math.abs(r - mid);
+          const color  = dist === 0 ? theme.brand : dist === 1 ? theme.text.secondary : theme.text.dim;
+          const isMid  = r === mid;
+          return (
+            <text key={r} fg={color}>
+              {isMid ? row.replace('◆', '◆') : row}
+            </text>
+          );
+        })}
+      </box>
     );
   }
 
+  // ── Logo 3: minimal / text ───────────────────────────────────────────────
+  const lines3 = [
+    '',
+    '   ┌─────────────────────┐',
+    '   │                     │',
+    '   │    ◆  B L O N D E  │',
+    '   │                     │',
+    '   │   AI Coding Agent   │',
+    '   │       v 0.1.0       │',
+    '   │                     │',
+    '   └─────────────────────┘',
+    '',
+  ];
   return (
-    <Box flexDirection="column" width={width} paddingTop={1}>
-      <Text bold color={theme.brand}>◆ Blonde</Text>
-      <Text color={theme.text.dim}>v0.1.0</Text>
-      <Text color={theme.text.dim}>AI Coding Agent</Text>
-    </Box>
+    <box flexDirection="column" width={width} height={height}>
+      {Array.from({ length: height }, (_, r) => {
+        const txt = lines3[r] ?? '';
+        const isBrand = txt.includes('BLONDE') || txt.includes('B L O N D E');
+        const isSub   = txt.includes('AI') || txt.includes('v 0');
+        const color   = isBrand ? theme.brand : isSub ? theme.text.secondary : theme.border.normal;
+        return <text key={r} fg={color}>{txt}</text>;
+      })}
+    </box>
   );
 };

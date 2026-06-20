@@ -1,5 +1,4 @@
 import React from 'react';
-import { Box, Text } from 'ink';
 import { theme } from '../theme.js';
 import { ProgressBar } from './ProgressBar.js';
 
@@ -19,14 +18,18 @@ export const ContextPanel: React.FC<ContextPanelProps> = ({ used, total, focused
   const pct = total > 0 ? Math.round((used / total) * 100) : 0;
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={borderColor} height={height} overflow="hidden">
-      <Box paddingX={1}>
-        <Text color={theme.text.secondary} bold>Context</Text>
-      </Box>
-      <Box flexDirection="column" paddingX={1} paddingBottom={1}>
-        <Text color={theme.text.dim}>{fmt(used)} / {fmt(total)} tokens</Text>
+    <box
+      flexDirection="column"
+      borderStyle="single"
+      borderColor={borderColor}
+      title=" Context "
+      titleColor={theme.text.secondary}
+      height={height}
+    >
+      <box flexDirection="column" paddingLeft={1} paddingRight={1} paddingBottom={1}>
+        <text fg={theme.text.dim}>{fmt(used)} / {fmt(total)} tokens</text>
         <ProgressBar value={pct} width={14} />
-      </Box>
-    </Box>
+      </box>
+    </box>
   );
 };

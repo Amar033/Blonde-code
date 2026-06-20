@@ -1,17 +1,15 @@
 import React, { useState, useRef, useCallback, useEffect, memo } from 'react';
-import { Box, Text, useInput, useStdout } from 'ink';
-import TextInput from 'ink-text-input';
+import { useKeyboard, useTerminalDimensions, useRenderer } from '@opentui/react';
 import { AgentRuntime, type ApprovalCallback } from '../../runtime/core.js';
 import { ToolRegistry } from '../../tools/registry.js';
 import { SessionManager, type Session } from '../../sessions/session-manager.js';
 import { theme, applyThemeMode, type ThemeMode } from '../theme.js';
+import { mdSyntaxStyle } from '../syntax-style.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
-import { MarkdownBlock } from '../components/MarkdownBlock.js';
 import { FilesPanel, type FileChange } from '../components/FilesPanel.js';
 import { ToolsPanel, type ToolEntry } from '../components/ToolsPanel.js';
 import { ContextPanel } from '../components/ContextPanel.js';
 import { CommandPalette } from '../components/CommandPalette.js';
-import { AppHeader } from '../components/AppHeader.js';
 import { mockEventStream } from '../mock/eventStream.js';
 import type { Plan, Observation } from '../../types/agent.js';
 import { providerRegistry, parseProviderAdd } from '../../planner/provider-registry.js';
@@ -42,7 +40,6 @@ interface ActiveTool {
 }
 
 type FocusTarget = 'input' | 'conv' | 'files' | 'tools' | 'ctx';
-
 const FOCUS_CYCLE: FocusTarget[] = ['input', 'conv', 'files', 'tools', 'ctx'];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -54,151 +51,109 @@ function argSummary(name: string, args: Record<string, unknown>): string {
   return k ? `${k}: ${String(args[k]).slice(0, 35)}` : '';
 }
 
-function diffLineColor(line: string, fallback: string): string {
-  if (line.startsWith('+') && !line.startsWith('+++')) return theme.diff.added;
-  if (line.startsWith('-') && !line.startsWith('---')) return theme.diff.deleted;
-  if (line.startsWith('@@'))  return theme.syntax.keyword;
-  if (line.startsWith('+++') || line.startsWith('---')) return theme.text.dim;
-  if (line.startsWith('  + ')) return theme.diff.added;
-  if (line.startsWith('  - ')) return theme.diff.deleted;
-  return fallback;
-}
-
-interface DiffRow {
-  oldNum: number | null; newNum: number | null;
-  type: 'add' | 'del' | 'ctx' | 'hunk' | 'meta';
-  content: string;
-}
-
-function buildDiffRows(summary: string): DiffRow[] {
-  const rows: DiffRow[] = [];
-  let oldN = 1, newN = 1;
-  for (const raw of summary.split('\n')) {
-    if (raw.startsWith('@@')) {
-      const m = raw.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-      if (m) { oldN = +m[1]; newN = +m[2]; }
-      rows.push({ oldNum: null, newNum: null, type: 'hunk', content: raw }); continue;
-    }
-    if (raw.startsWith('+++') || raw.startsWith('---')) {
-      rows.push({ oldNum: null, newNum: null, type: 'meta', content: raw }); continue;
-    }
-    if (raw.startsWith('+')) { rows.push({ oldNum: null, newNum: newN++, type: 'add', content: raw.slice(1) }); continue; }
-    if (raw.startsWith('-')) { rows.push({ oldNum: oldN++, newNum: null, type: 'del', content: raw.slice(1) }); continue; }
-    if (raw.startsWith(' ')) { rows.push({ oldNum: oldN++, newNum: newN++, type: 'ctx', content: raw.slice(1) }); continue; }
-    rows.push({ oldNum: null, newNum: null, type: 'meta', content: raw });
-  }
-  return rows;
-}
-
 // ─── Item renderer ────────────────────────────────────────────────────────────
 
 const ItemView = memo(({ item }: { item: CompletedItem }) => {
   if (item.kind === 'user') {
+    // OpenCode style: left blue accent bar, your message highlighted
     return (
-      <Box flexDirection="column" marginTop={1} flexShrink={0}>
-        <Text color={theme.role.user} bold>▶ You</Text>
-        <Box paddingLeft={3}>
-          <Text color={theme.text.primary} wrap="wrap">{item.text}</Text>
-        </Box>
-      </Box>
+      <box flexDirection="column" marginTop={1} border={['left']} borderStyle="single" borderColor={theme.border.active} paddingLeft={1}>
+        <box>
+          <text fg={theme.role.user}>▶ You</text>
+        </box>
+        <box paddingLeft={2}>
+          <text fg={theme.text.primary}>{item.text}</text>
+        </box>
+      </box>
     );
   }
 
   if (item.kind === 'plan') {
-    const desc = item.first.length > 56 ? item.first.slice(0, 56) + '…' : item.first;
+    const desc = item.first.length > 60 ? item.first.slice(0, 60) + '…' : item.first;
     return (
-      <Box marginLeft={2} marginTop={1} gap={1} flexShrink={0}>
-        <Text color={theme.text.dim}>◦</Text>
-        <Text color={theme.text.dim}>Planning {item.stepCount} steps</Text>
-        <Text color={theme.text.dim}>— {desc}</Text>
-      </Box>
+      <box marginLeft={2} marginTop={1}>
+        <text fg={theme.text.dim}>◦ Planning {item.stepCount} steps — {desc}</text>
+      </box>
     );
   }
 
   if (item.kind === 'tool' && item.toolName === 'git_diff' && item.success) {
-    const rows = buildDiffRows(item.result);
-    const meta = rows.find(r => r.type === 'meta')?.content ?? '';
     return (
-      <Box flexDirection="column" marginLeft={2} marginTop={1} flexShrink={0}>
-        <Box gap={1}>
-          <Text color={theme.status.success}>◆</Text>
-          <Text bold color={theme.syntax.keyword}>git_diff</Text>
-          {item.argsSummary && <Text color={theme.text.dim}>({item.argsSummary})</Text>}
-          <Text color={theme.text.dim}>· {item.ms}ms</Text>
-        </Box>
-        <Box marginLeft={4} flexDirection="column">
-          {meta ? <Text color={theme.text.dim}>{meta}</Text> : null}
-          {rows.filter(r => r.type !== 'meta').map((row, i) => {
-            if (row.type === 'hunk') return <Box key={i}><Text color={theme.syntax.keyword}>{row.content.slice(0, 72)}</Text></Box>;
-            const pad = (n: number | null) => n !== null ? String(n).padStart(3) : '   ';
-            const marker = row.type === 'add' ? '+' : row.type === 'del' ? '-' : ' ';
-            const bg = row.type === 'add' ? 'green' : row.type === 'del' ? 'red' : undefined;
-            const fg = row.type === 'ctx' ? theme.text.dim : 'white';
-            return (
-              <Box key={i}>
-                <Text color={theme.text.dim}>{pad(row.oldNum)} {pad(row.newNum)} </Text>
-                <Text backgroundColor={bg} color={fg} bold={row.type !== 'ctx'}>{marker} {row.content.slice(0, 68)}</Text>
-              </Box>
-            );
-          })}
-        </Box>
-      </Box>
+      <box flexDirection="column" marginLeft={2} marginTop={1}>
+        <box>
+          <text fg={theme.status.success}>◆ </text>
+          <text fg={theme.syntax.keyword}>git_diff</text>
+          {item.argsSummary ? <text fg={theme.text.dim}> ({item.argsSummary})</text> : null}
+          <text fg={theme.text.dim}> · {item.ms}ms</text>
+        </box>
+        <diff
+          diff={item.result}
+          view="unified"
+          syntaxStyle={mdSyntaxStyle}
+          showLineNumbers={true}
+          width="100%"
+          height={18}
+        />
+      </box>
     );
   }
 
   if (item.kind === 'tool') {
-    const icon  = item.success ? '◆' : '✗';
-    const ic    = item.success ? theme.status.success : theme.status.error;
-    const rc    = item.success ? theme.text.secondary : theme.status.error;
-    const MAX_LINE = 74;
+    const icon = item.success ? '◆' : '✗';
+    const ic   = item.success ? theme.status.success : theme.status.error;
+    const rc   = item.success ? theme.text.secondary : theme.status.error;
+    const MAX_LINE = 80;
     const MAX_ROWS = 3;
     const rawLines = item.result.split('\n').filter(l => l.trim());
     const lines    = rawLines.slice(0, MAX_ROWS).map(l => l.slice(0, MAX_LINE));
     const trunc    = rawLines.length > MAX_ROWS || item.result.length > MAX_LINE * MAX_ROWS;
     return (
-      <Box flexDirection="column" marginLeft={2} marginTop={1} flexShrink={0}>
-        <Box gap={1}>
-          <Text color={ic}>{icon}</Text>
-          <Text bold color={theme.syntax.keyword}>{item.toolName}</Text>
-          {item.argsSummary && <Text color={theme.text.dim}>({item.argsSummary})</Text>}
-          <Text color={theme.text.dim}>· {item.ms}ms</Text>
-        </Box>
+      <box flexDirection="column" marginLeft={2} marginTop={1}>
+        <box>
+          <text fg={ic}>{icon} </text>
+          <text fg={theme.syntax.keyword}>{item.toolName}</text>
+          {item.argsSummary ? <text fg={theme.text.dim}> ({item.argsSummary})</text> : null}
+          <text fg={theme.text.dim}> · {item.ms}ms</text>
+        </box>
         {lines.map((line, i) => (
-          <Box key={i} marginLeft={2}>
-            <Text color={theme.text.dim}>{i === 0 ? '└ ' : '  '}</Text>
-            <Text color={diffLineColor(line, rc)}>
-              {line}{i === lines.length - 1 && trunc ? '…' : ''}
-            </Text>
-          </Box>
+          <box key={i} paddingLeft={3}>
+            <text fg={rc}>{line}{i === lines.length - 1 && trunc ? '…' : ''}</text>
+          </box>
         ))}
-      </Box>
+      </box>
     );
   }
 
   if (item.kind === 'assistant') {
     const sources = item.sources ?? [];
     return (
-      <Box flexDirection="column" marginTop={1} flexShrink={0}>
-        <Text color={theme.role.assistant} bold>◆ Blonde</Text>
-        <Box marginLeft={2} flexDirection="column">
-          <MarkdownBlock text={item.text} />
-        </Box>
+      <box flexDirection="column" marginTop={1}>
+        <box>
+          <text fg={theme.role.assistant}>◆ Blonde</text>
+        </box>
+        <box paddingLeft={2}>
+          <markdown
+            content={item.text}
+            syntaxStyle={mdSyntaxStyle}
+            streaming={false}
+            conceal={true}
+          />
+        </box>
         {sources.length > 0 && (
-          <Box marginLeft={2} marginTop={1} gap={1} flexShrink={0}>
-            <Text color={theme.text.dim} dimColor>·</Text>
-            <Text color={theme.text.dim} dimColor>{sources.length} source{sources.length !== 1 ? 's' : ''}</Text>
-          </Box>
+          <box paddingLeft={2} marginTop={1}>
+            <text fg={theme.text.dim}>· {sources.length} source{sources.length !== 1 ? 's' : ''}</text>
+          </box>
         )}
-      </Box>
+      </box>
     );
   }
 
   if (item.kind === 'system') {
     return (
-      <Box marginTop={1} gap={1} flexShrink={0}>
-        <Text color={theme.status.warning}>{'!'}</Text>
-        <Text color={theme.text.secondary}>{item.text}</Text>
-      </Box>
+      <box marginTop={1}>
+        <text fg={theme.status.warning}>! </text>
+        <text fg={theme.text.secondary}>{item.text}</text>
+      </box>
     );
   }
 
@@ -208,25 +163,18 @@ const ItemView = memo(({ item }: { item: CompletedItem }) => {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 interface UnifiedSessionProps {
-  initialTask?: string;
-  resumeSession?: Session;
-  mockMode?: boolean;
-  onComplete?: () => void;
+  initialTask?:    string;
+  resumeSession?:  Session;
+  mockMode?:       boolean;
+  onComplete?:     () => void;
   onShowSessions?: () => void;
 }
 
 export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
   initialTask, resumeSession, mockMode, onComplete, onShowSessions
 }) => {
-  const { stdout } = useStdout();
-  const [termCols, setTermCols] = useState(stdout.columns || 80);
-  const [termRows, setTermRows] = useState(stdout.rows || 24);
-
-  useEffect(() => {
-    const onResize = () => { setTermCols(stdout.columns || 80); setTermRows(stdout.rows || 24); };
-    stdout.on('resize', onResize);
-    return () => { stdout.off('resize', onResize); };
-  }, [stdout]);
+  const { width: termCols, height: termRows } = useTerminalDimensions();
+  const renderer = useRenderer();
 
   const useSidebar = termCols >= 80;
   const sideWidth  = useSidebar ? Math.max(22, Math.floor(termCols * 0.32)) : 0;
@@ -252,15 +200,6 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
   const [showPalette,     setShowPalette]     = useState(false);
   const [approvalRequest, setApprovalRequest] = useState<ApprovalRequest | null>(null);
   const [currentModel,    setCurrentModel]    = useState(process.env.LLM_MODEL || 'qwen3.5:latest');
-
-  // Sync status-bar model with the active registry provider on mount
-  useEffect(() => {
-    providerRegistry.getActive().then(active => {
-      if (active?.model) {
-        setCurrentModel(`${active.model} · ${active.type}:${active.name}`);
-      }
-    }).catch(() => {});
-  }, []);
   const [tokenUsage,      setTokenUsage]      = useState(0);
   const [contextWindow,   setContextWindow]   = useState(8192);
   const [contextWarned,   setContextWarned]   = useState(false);
@@ -268,7 +207,6 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
   const [streamResponse,  setStreamResponse]  = useState('');
   const [fileChanges,     setFileChanges]     = useState<FileChange[]>([]);
   const [toolLog,         setToolLog]         = useState<ToolEntry[]>([]);
-  const [scrollUp,        setScrollUp]        = useState(0);
   const [focus,           setFocus]           = useState<FocusTarget>('input');
   const [inputHistory,    setInputHistory]    = useState<string[]>([]);
   const [historyIdx,      setHistoryIdx]      = useState(-1);
@@ -276,7 +214,6 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
   const idRef               = useRef(0);
   const toolStartMs         = useRef(Date.now());
   const toolCounterRef      = useRef(0);
-  const maxScrollRef        = useRef(0);
   const runtimeRef          = useRef<AgentRuntime | null>(null);
   const initPromiseRef      = useRef<Promise<AgentRuntime> | null>(null);
   const sessionMgrRef       = useRef<SessionManager | null>(null);
@@ -285,11 +222,33 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
   const historyToRestoreRef = useRef<Array<{role: 'user'|'assistant'; content: string}> | null>(null);
   const runningToolIdRef    = useRef<string | null>(null);
   const pendingSourcesRef   = useRef<SearchSource[]>([]);
+  const inputElRef          = useRef<any>(null);
+  const convScrollRef       = useRef<any>(null);
 
   const CWD = process.cwd().replace(os.homedir(), '~');
 
   const ctxPct   = contextWindow > 0 ? Math.round((tokenUsage / contextWindow) * 100) : 0;
   const ctxColor = ctxPct >= 90 ? theme.status.error : ctxPct >= 75 ? theme.status.warning : theme.text.dim;
+
+  // Sync active provider model label on mount
+  useEffect(() => {
+    providerRegistry.getActive().then(active => {
+      if (active?.model) setCurrentModel(`${active.model} · ${active.type}:${active.name}`);
+    }).catch(() => {});
+  }, []);
+
+  // Focus management: direct the active UI element
+  useEffect(() => {
+    if (focus === 'input') {
+      inputElRef.current?.focus?.();
+      convScrollRef.current?.blur?.();
+    } else if (focus === 'conv') {
+      convScrollRef.current?.focus?.();
+      inputElRef.current?.blur?.();
+    } else {
+      inputElRef.current?.blur?.();
+    }
+  }, [focus]);
 
   // ── Helpers ────────────────────────────────────────────────
 
@@ -302,7 +261,6 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
     setCompleted([]);
     setFileChanges([]);
     setToolLog([]);
-    setScrollUp(0);
     idRef.current = 0;
   }, []);
 
@@ -311,15 +269,11 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
     setStreamResponse('');
   }, []);
 
-  // Track file changes from tool results
   const trackFileChange = useCallback((toolName: string, obs: Observation) => {
     const p = obs.input.path as string | undefined;
     if (!p) return;
     if (toolName === 'write_file' && obs.success) {
-      setFileChanges(prev => {
-        const exists = prev.some(f => f.path === p);
-        return exists ? prev : [...prev, { path: p, type: 'A' }];
-      });
+      setFileChanges(prev => prev.some(f => f.path === p) ? prev : [...prev, { path: p, type: 'A' }]);
     }
     if (toolName === 'edit_file' && obs.success) {
       setFileChanges(prev => {
@@ -376,7 +330,6 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
       .catch(() => { if (initialTask) runTask(initialTask); });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Mock mode: run immediately with fake event stream
   useEffect(() => {
     if (!mockMode) return;
     runTask('Build a FastAPI backend with SQLite database');
@@ -414,11 +367,9 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
     setIsRunning(true);
     setIsThinking(true);
     setAgentStatus('planning');
-    setScrollUp(0);
 
     const mgr = sessionMgrRef.current;
     mgr?.addMessage('user', task);
-
     pendingSourcesRef.current = [];
 
     try {
@@ -433,11 +384,10 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
             const isFirst = mgr && !firstMessageRef.current;
             if (isFirst) firstMessageRef.current = task;
             yield* runtime.run(task);
-            // name session after first run
             if (isFirst) {
               const llm = runtime.getRuntimeLLM();
               if (llm) {
-                llm.generateSessionName(task).then(name => {
+                llm.generateSessionName(task).then((name: string) => {
                   mgr!.setName(name);
                   mgr!.save().catch(() => {});
                 }).catch(() => {});
@@ -495,9 +445,9 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
 
         if (event.type === 'observation_ready') {
           clearStream();
-          const obs  = event.observation;
-          const ms   = Date.now() - toolStartMs.current;
-          const tid  = runningToolIdRef.current;
+          const obs = event.observation;
+          const ms  = Date.now() - toolStartMs.current;
+          const tid = runningToolIdRef.current;
           setActiveTool(null);
           runningToolIdRef.current = null;
           push({ kind: 'tool', toolName: obs.toolName, argsSummary: argSummary(obs.toolName, obs.input), result: obs.summary, success: obs.success, ms });
@@ -521,7 +471,8 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
           push({ kind: 'assistant', text: event.finalResponse, sources });
           setTurns(t => t + 1);
           mgr?.addMessage('assistant', event.finalResponse);
-          setScrollUp(0); // return to bottom so newest response is visible
+          // OS notification when task completes
+          try { renderer.triggerNotification('Task complete', 'Blonde'); } catch {}
           if (!mockMode) {
             const runtime = runtimeRef.current;
             if (runtime) {
@@ -554,7 +505,7 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
       setAgentStatus('idle');
       mgr?.save().catch(() => {});
     }
-  }, [push, initRuntime, contextWindow, contextWarned, trackFileChange, mockMode]);
+  }, [push, initRuntime, contextWindow, contextWarned, trackFileChange, mockMode, renderer]);
 
   // ── Command handler ────────────────────────────────────────
 
@@ -576,15 +527,15 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
       return;
     }
     if (val === '/model' || val === '/models') {
-      const provider = process.env.LLM_PROVIDER || 'ollama';
-      if (provider === 'ollama') {
+      const providerType = process.env.LLM_PROVIDER || 'ollama';
+      if (providerType === 'ollama') {
         import('../../planner/providers/ollama.js').then(async ({ OllamaProvider, findOllamaModelsDirs }: any) => {
           const p = new OllamaProvider(currentModel, process.env.OLLAMA_BASE_URL || 'http://localhost:11434');
           const [models, dirs] = await Promise.all([p.listModels(), findOllamaModelsDirs()]);
           push({ kind: 'system', text: `current: ${currentModel}  available: ${models.join(', ')}  dir: ${dirs[0]?.path ?? '~/.ollama/models'}  /model <name> to switch` });
-        }).catch(() => push({ kind: 'system', text: `current: ${currentModel} (${provider})` }));
+        }).catch(() => push({ kind: 'system', text: `current: ${currentModel} (${providerType})` }));
       } else {
-        push({ kind: 'system', text: `current: ${currentModel} (${provider})` });
+        push({ kind: 'system', text: `current: ${currentModel} (${providerType})` });
       }
       return;
     }
@@ -604,8 +555,6 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
       push({ kind: 'system', text: `Theme set to ${mode}` });
       return;
     }
-
-    // ── /provider commands ─────────────────────────────────────────────────────
     if (val === '/provider' || val === '/providers') {
       providerRegistry.list().then(list => {
         if (list.length === 0) {
@@ -624,10 +573,7 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
     if (val.startsWith('/provider add ')) {
       const parts  = val.slice('/provider add '.length).trim().split(/\s+/);
       const result = parseProviderAdd(parts);
-      if (typeof result === 'string') {
-        push({ kind: 'system', text: result });
-        return;
-      }
+      if (typeof result === 'string') { push({ kind: 'system', text: result }); return; }
       providerRegistry.add(result).then(() => {
         push({ kind: 'system', text: `Provider "${result.name}" added (${result.type} · ${result.model}). Use /provider use ${result.name} to activate.` });
       }).catch(err => push({ kind: 'system', text: `Failed to save provider: ${err}` }));
@@ -637,9 +583,8 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
       const name = val.slice('/provider use '.length).trim();
       providerRegistry.setActive(name).then(ok => {
         if (!ok) { push({ kind: 'system', text: `Unknown provider "${name}". Run /provider to list.` }); return; }
-        // Reset runtime so the next run picks up the new provider
-        runtimeRef.current      = null;
-        initPromiseRef.current  = null;
+        runtimeRef.current = null;
+        initPromiseRef.current = null;
         push({ kind: 'system', text: `Switched to provider "${name}". Next message will use it.` });
       }).catch(err => push({ kind: 'system', text: `Error: ${err}` }));
       return;
@@ -648,8 +593,7 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
       const name = val.slice('/provider remove '.length).trim();
       providerRegistry.remove(name).then(ok => {
         if (!ok) { push({ kind: 'system', text: `Unknown provider "${name}".` }); return; }
-        // If this was the active provider, reset the runtime too
-        runtimeRef.current     = null;
+        runtimeRef.current = null;
         initPromiseRef.current = null;
         push({ kind: 'system', text: `Provider "${name}" removed.` });
       }).catch(err => push({ kind: 'system', text: `Error: ${err}` }));
@@ -657,7 +601,7 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
     }
     if (val === '/provider clear' || val === '/provider reset') {
       providerRegistry.clearActive().then(() => {
-        runtimeRef.current     = null;
+        runtimeRef.current = null;
         initPromiseRef.current = null;
         push({ kind: 'system', text: 'Active provider cleared — falling back to .env settings.' });
       }).catch(err => push({ kind: 'system', text: `Error: ${err}` }));
@@ -670,7 +614,6 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
         '  types: openai · anthropic · openrouter · openai-compatible · ollama',
         '  e.g. /provider add gpt openai sk-abc123 gpt-4o-mini',
         '  e.g. /provider add claude anthropic sk-ant-xxx claude-haiku-4-5-20251001',
-        '  e.g. /provider add local openai-compatible - llama3 http://localhost:8080/v1',
         '/provider use <name>   — switch active provider',
         '/provider remove <name>— delete a provider',
         '/provider clear        — revert to .env settings',
@@ -686,9 +629,11 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
   const handleSubmit = useCallback(() => {
     const val = input.trim();
     if (!val) return;
+    // Clear the input
     setInput('');
     setHistoryIdx(-1);
     setInputHistory(prev => [val, ...prev.slice(0, 49)]);
+    if (inputElRef.current) inputElRef.current.value = '';
 
     // Approval flow
     if (approvalRequest && approvalResolveRef.current) {
@@ -704,26 +649,30 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
 
   // ── Keyboard handling ──────────────────────────────────────
 
-  useInput((char, key) => {
-    // Ctrl+C — interrupt
-    if (key.ctrl && char === 'c' && isRunning) {
-      runtimeRef.current?.abort();
-      setIsRunning(false);
-      setAgentStatus('idle');
+  useKeyboard((key) => {
+    // Ctrl+C — interrupt agent or quit
+    if (key.ctrl && key.name === 'c') {
+      if (isRunning) {
+        runtimeRef.current?.abort();
+        setIsRunning(false);
+        setAgentStatus('idle');
+      } else {
+        renderer.destroy();
+      }
       return;
     }
     // Ctrl+L — clear
-    if (key.ctrl && char === 'l') { clearAll(); return; }
-    // Ctrl+K — command palette toggle (only when not in palette)
-    if (key.ctrl && char === 'k' && !showPalette) { setShowPalette(true); return; }
+    if (key.ctrl && key.name === 'l') { clearAll(); return; }
+    // Ctrl+K — command palette
+    if (key.ctrl && key.name === 'k' && !showPalette) { setShowPalette(true); return; }
 
-    // Page Up / Page Down — scroll conversation from ANY focus, no Tab required
-    if (key.pageUp)   { setScrollUp(s => Math.min(s + 10, maxScrollRef.current)); return; }
-    if (key.pageDown) { setScrollUp(s => Math.max(0, s - 10)); return; }
+    // Page up/down — scroll conversation
+    if (key.name === 'pageup')   { convScrollRef.current?.scrollBy?.({ y: -10 }); return; }
+    if (key.name === 'pagedown') { convScrollRef.current?.scrollBy?.({ y:  10 }); return; }
 
-    // Tab — cycle panel focus
-    if (key.tab) {
-      const idx = FOCUS_CYCLE.indexOf(focus);
+    // Tab — cycle focus
+    if (key.name === 'tab') {
+      const idx  = FOCUS_CYCLE.indexOf(focus);
       const next = key.shift
         ? FOCUS_CYCLE[(idx - 1 + FOCUS_CYCLE.length) % FOCUS_CYCLE.length]
         : FOCUS_CYCLE[(idx + 1) % FOCUS_CYCLE.length];
@@ -731,48 +680,56 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
       return;
     }
 
-    // Conversation panel navigation (vim-style, only when conv is focused via Tab)
-    if (focus === 'conv') {
-      if (key.upArrow || char === 'k')   { setScrollUp(s => Math.min(s + 3, maxScrollRef.current)); return; }
-      if (key.downArrow || char === 'j') { setScrollUp(s => Math.max(0, s - 3)); return; }
-      if (char === 'g') { setScrollUp(maxScrollRef.current); return; }
-      if (char === 'G') { setScrollUp(0); return; }
+    // j/k scroll from any panel when input is empty and not running
+    if (input === '' && !isRunning) {
+      if (key.sequence === 'k') { convScrollRef.current?.scrollBy?.({ y: -3 }); return; }
+      if (key.sequence === 'j') { convScrollRef.current?.scrollBy?.({ y:  3 }); return; }
     }
 
-    // Input history navigation (only when input is focused and matches)
+    // Conversation focus: arrow + vim keys
+    if (focus === 'conv') {
+      if (key.name === 'up')   { convScrollRef.current?.scrollBy?.({ y: -3 }); return; }
+      if (key.name === 'down') { convScrollRef.current?.scrollBy?.({ y:  3 }); return; }
+      if (key.sequence === 'g') { convScrollRef.current?.scrollTo?.({ y: 0 }); return; }
+      if (key.shift && key.sequence === 'G') { convScrollRef.current?.scrollTo?.({ y: 999999 }); return; }
+    }
+
+    // Input history (only in input focus, when buffer empty)
     if (focus === 'input') {
-      if (key.upArrow && input === '') {
+      if (key.name === 'up' && input === '') {
         const newIdx = Math.min(historyIdx + 1, inputHistory.length - 1);
         if (newIdx >= 0 && newIdx < inputHistory.length) {
           setHistoryIdx(newIdx);
-          setInput(inputHistory[newIdx] ?? '');
+          const val = inputHistory[newIdx] ?? '';
+          setInput(val);
+          if (inputElRef.current) inputElRef.current.value = val;
         }
         return;
       }
-      if (key.downArrow && historyIdx >= 0) {
+      if (key.name === 'down' && historyIdx >= 0) {
         const newIdx = historyIdx - 1;
         setHistoryIdx(newIdx);
-        setInput(newIdx >= 0 ? (inputHistory[newIdx] ?? '') : '');
+        const val = newIdx >= 0 ? (inputHistory[newIdx] ?? '') : '';
+        setInput(val);
+        if (inputElRef.current) inputElRef.current.value = val;
         return;
       }
+      // Enter is handled by <input onSubmit> — do not call handleSubmit() here too
     }
 
-    // Quit with q when input is empty and not running
-    if (char === 'q' && input === '' && !isRunning && focus === 'input') {
-      process.exit(0);
+    // Quit with q when idle
+    if (key.sequence === 'q' && input === '' && !isRunning && focus === 'input') {
+      renderer.destroy();
     }
-  }, { isActive: !showPalette });
+  });
 
   // ── Layout heights ────────────────────────────────────────
-  // palette lives between content row and input — reduce convH when shown
 
-  const paletteH = showPalette ? 12 : 0;
-  const convH    = Math.max(6, termRows - 3 - paletteH - 4);
-
-  // sidebar panel heights — sum must equal convH
-  const filesH = Math.max(4, Math.floor(convH * 0.27));
-  const toolsH = Math.max(5, Math.floor(convH * 0.44));
-  const ctxH   = Math.max(4, convH - filesH - toolsH);
+  const paletteH  = showPalette ? 12 : 0;
+  const convH     = Math.max(6, termRows - 2 - paletteH - 3); // -2 status bar, -3 input
+  const filesH    = Math.max(4, Math.floor(convH * 0.27));
+  const toolsH    = Math.max(5, Math.floor(convH * 0.44));
+  const ctxH      = Math.max(4, convH - filesH - toolsH);
 
   // ── Derived ───────────────────────────────────────────────
 
@@ -787,235 +744,208 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
     ? "agent running — type 'stop' to cancel"
     : 'Ask anything… (Ctrl+K for commands)';
 
+  const convBorder = focus === 'conv' ? theme.border.active : theme.border.dim;
+
   const footerHint = focus === 'conv'
-    ? '↑↓/jk · scroll   PgUp/PgDn · scroll   g · top   G · bottom   Tab · panels'
+    ? '↑↓/jk scroll   g top   G btm   Tab panels'
     : focus !== 'input'
-    ? 'PgUp/PgDn · scroll   Tab · panels'
+    ? 'PgUp/PgDn scroll   Tab panels'
     : isRunning
-    ? 'PgUp/PgDn · scroll   stop · cancel   Ctrl+C · interrupt   Ctrl+K · cmds'
-    : 'Enter · submit   PgUp/PgDn · scroll   ↑ · history   Tab · panels   Ctrl+K · cmds';
-
-  const convBorder  = focus === 'conv' ? theme.border.active : theme.border.normal;
-
-  // ── Slice-based scroll: estimate item heights, pick visible window ──
-  const mainW = Math.max(termCols - (useSidebar ? sideWidth : 0) - 8, 40);
-
-  const estItemH = (item: CompletedItem): number => {
-    if (item.kind === 'assistant') {
-      const wl = Math.ceil(item.text.length / mainW);
-      const nl = item.text.split('\n').length;
-      return Math.ceil(Math.max(wl, nl) * 1.4) + 3;
-    }
-    if (item.kind === 'user') return 2 + Math.ceil(item.text.length / mainW);
-    if (item.kind === 'tool') return 4;
-    if (item.kind === 'plan') return 2;
-    return 2;
-  };
-
-  const heights     = completed.map(estItemH);
-  const totalH      = heights.reduce((a, b) => a + b, 0);
-  const maxScroll   = Math.max(0, totalH - convH + 4);
-  maxScrollRef.current = maxScroll;
-
-  const clamped     = Math.min(scrollUp, maxScroll);
-  const windowEnd   = totalH - clamped;
-  const windowStart = Math.max(0, windowEnd - convH);
-  const displayItems: CompletedItem[] = [];
-  let cumH = 0;
-  for (let i = 0; i < completed.length; i++) {
-    const h = heights[i];
-    if (cumH + h > windowStart && cumH < windowEnd) displayItems.push(completed[i]);
-    cumH += h;
-  }
-
-  const firstVisible = displayItems.length > 0 ? completed.indexOf(displayItems[0]) : -1;
-  const lastVisible  = displayItems.length > 0 ? completed.indexOf(displayItems[displayItems.length - 1]) : -1;
+    ? 'stop · cancel   Ctrl+C · interrupt   Ctrl+K · cmds'
+    : '↑ history   Tab panels   Ctrl+K cmds   q quit';
 
   // ─── Render ───────────────────────────────────────────────
 
   return (
-    <Box flexDirection="column" height={termRows}>
+    <box flexDirection="column" height={termRows}>
 
-      {/* ── Header — shared component, matches welcome screen ── */}
-      <AppHeader
-        model={currentModel}
-        tokenUsage={tokenUsage}
-        timeDisplay={`${mm}:${ss}`}
-      />
+      {/* ── Content row ── */}
+      <box flexDirection="row" gap={1} height={convH}>
 
-      {/* ── Content row — fixed height, sidebar always visible ── */}
-      <Box flexDirection="row" gap={1} height={convH}>
-
-        {/* Left: conversation panel */}
-        <Box flexDirection="column" flexGrow={1} borderStyle="round" borderColor={convBorder}>
-          {/* Panel title */}
-          <Box paddingX={1}>
-            <Text color={theme.text.secondary} bold>Conversation</Text>
-            {scrollUp > 0 && firstVisible >= 0 && (
-              <Text color={theme.text.dim}> ↑ msg {firstVisible + 1}–{lastVisible + 1}/{completed.length} · G=btm</Text>
-            )}
-            {turns > 0 && <Text color={theme.text.dim}> · turn {turns}</Text>}
-          </Box>
-
-          {/* Normal column with top spacer: content anchors to bottom, no column-reverse tricks */}
-          <Box flexDirection="column" flexGrow={1} overflow="hidden">
-
-            {/* Flex spacer pushes all content to the bottom */}
-            <Box flexGrow={1} />
-
-            {/* Visible conversation slice — oldest-to-newest in natural order */}
-            {displayItems.map(item => (
+        {/* Conversation panel */}
+        <box
+          flexDirection="column"
+          flexGrow={1}
+          borderStyle="single"
+          borderColor={convBorder}
+          title={turns > 0 ? ` Conversation · turn ${turns} ` : ' Conversation '}
+          titleColor={theme.text.secondary}
+        >
+          {/* Scrollable conversation — sticky bottom, viewport culling */}
+          <scrollbox
+            ref={convScrollRef}
+            scrollY={true}
+            stickyScroll={true}
+            stickyStart="bottom"
+            viewportCulling={true}
+            flexGrow={1}
+          >
+            {completed.map(item => (
               <ItemView key={item.id} item={item} />
             ))}
 
             {/* Live: active tool */}
             {activeTool && (
-              <Box marginLeft={2} marginTop={1} gap={1} flexShrink={0}>
+              <box marginLeft={2} marginTop={1}>
                 <BrailleSpinner color={theme.status.running} />
-                <Text bold color={theme.syntax.keyword}>{activeTool.toolName}</Text>
-                {activeTool.argsSummary && <Text color={theme.text.dim}>({activeTool.argsSummary})</Text>}
-              </Box>
+                <text fg={theme.syntax.keyword}> {activeTool.toolName}</text>
+                {activeTool.argsSummary ? <text fg={theme.text.dim}> ({activeTool.argsSummary})</text> : null}
+              </box>
             )}
 
             {/* Live: streaming thinking */}
             {isRunning && streamThinking && (
-              <Box marginLeft={2} marginTop={1} gap={1} flexShrink={0}>
+              <box marginLeft={2} marginTop={1}>
                 <BrailleSpinner color={theme.status.running} />
-                <Text color={theme.text.dim}>
-                  {streamThinking.length > 160 ? '…' + streamThinking.slice(-160) : streamThinking}
-                </Text>
-              </Box>
+                <text fg={theme.text.dim}> {streamThinking.length > 160 ? '…' + streamThinking.slice(-160) : streamThinking}</text>
+              </box>
             )}
 
-            {/* Live: streaming response */}
+            {/* Live: streaming response via markdown renderer */}
             {isRunning && !streamThinking && streamResponse && (
-              <Box marginLeft={2} marginTop={1} gap={1} flexShrink={0}>
-                <Text color={theme.role.assistant}>◆ </Text>
-                <Text color={theme.text.primary} wrap="wrap">{streamResponse}</Text>
-              </Box>
+              <box flexDirection="column" marginTop={1}>
+                <box>
+                  <text fg={theme.role.assistant}>◆ Blonde</text>
+                </box>
+                <box paddingLeft={2}>
+                  <markdown
+                    content={streamResponse}
+                    syntaxStyle={mdSyntaxStyle}
+                    streaming={true}
+                  />
+                </box>
+              </box>
             )}
 
             {/* Live: fallback spinner */}
             {isThinking && !activeTool && !streamThinking && !streamResponse && (
-              <Box marginLeft={2} marginTop={1} gap={1} flexShrink={0}>
+              <box marginLeft={2} marginTop={1}>
                 <BrailleSpinner color={theme.status.running} />
-                <Text color={theme.text.secondary}>
-                  {agentStatus === 'planning' ? 'Planning…' : 'Thinking…'}
-                </Text>
-              </Box>
+                <text fg={theme.text.secondary}> {agentStatus === 'planning' ? 'Planning…' : 'Thinking…'}</text>
+              </box>
             )}
 
             {/* Help panel */}
             {showHelp && (
-              <Box flexDirection="column" borderStyle="single" borderColor={theme.border.normal}
-                paddingX={2} paddingY={1} marginX={1} marginTop={1} flexShrink={0}>
-                <Text bold color={theme.brand}>Commands</Text>
-                <Text color={theme.text.dim}>stop / Ctrl+C  · interrupt agent</Text>
-                <Text color={theme.text.dim}>/clear /Ctrl+L · clear conversation</Text>
-                <Text color={theme.text.dim}>/new           · fresh session</Text>
-                <Text color={theme.text.dim}>/sessions      · browse sessions</Text>
-                <Text color={theme.text.dim}>/model [name]  · list / switch model</Text>
-                <Text color={theme.text.dim}>/provider      · list / add / switch providers</Text>
-                <Text color={theme.text.dim}>/provider help · provider command reference</Text>
-                <Text color={theme.text.dim}>/theme [mode]  · dark / light / dark-ansi</Text>
-                <Text color={theme.text.dim}>Ctrl+K         · command palette</Text>
-                <Text color={theme.text.dim}>Tab            · cycle panel focus</Text>
-                <Text color={theme.text.dim}>?              · toggle this help</Text>
-              </Box>
+              <box flexDirection="column" borderStyle="single" borderColor={theme.border.normal}
+                paddingLeft={2} paddingRight={2} paddingTop={1} paddingBottom={1} marginLeft={1} marginTop={1}>
+                <box><text fg={theme.brand}>Commands</text></box>
+                {[
+                  'stop / Ctrl+C  · interrupt agent',
+                  '/clear /Ctrl+L · clear conversation',
+                  '/new           · fresh session',
+                  '/sessions      · browse sessions',
+                  '/model [name]  · list / switch model',
+                  '/provider      · list / add / switch providers',
+                  '/provider help · provider command reference',
+                  '/theme [mode]  · dark / light / dark-ansi',
+                  'Ctrl+K         · command palette',
+                  'Tab            · cycle panel focus',
+                  '?              · toggle this help',
+                ].map(h => <box key={h}><text fg={theme.text.dim}>{h}</text></box>)}
+              </box>
             )}
 
             {/* Approval panel */}
             {approvalRequest && (
-              <Box flexDirection="column" borderStyle="round"
-                borderColor={theme.status.warning} paddingX={2} paddingY={1}
-                marginX={1} marginTop={1} flexShrink={0}>
-                <Box gap={1}>
-                  <Text color={theme.status.warning}>⚠</Text>
-                  <Text bold color={theme.text.primary}>Approval needed —</Text>
-                  <Text bold color={theme.syntax.keyword}>{approvalRequest.toolName}</Text>
+              <box flexDirection="column" borderStyle="rounded"
+                borderColor={theme.status.warning} paddingLeft={2} paddingRight={2}
+                paddingTop={1} paddingBottom={1} marginLeft={1} marginTop={1}>
+                <box gap={1}>
+                  <text fg={theme.status.warning}>⚠</text>
+                  <text fg={theme.text.primary}><strong>Approval needed —</strong></text>
+                  <text fg={theme.syntax.keyword}><strong>{approvalRequest.toolName}</strong></text>
                   {approvalRequest.args['path'] != null && (
-                    <Text color={theme.text.dim}>→ {String(approvalRequest.args['path'])}</Text>
+                    <text fg={theme.text.dim}>→ {String(approvalRequest.args['path'])}</text>
                   )}
-                </Box>
+                </box>
                 {approvalRequest.toolName === 'edit_file' && (
-                  <Box flexDirection="column" marginTop={1}>
+                  <box flexDirection="column" marginTop={1}>
                     {String(approvalRequest.args['find'] ?? '').split('\n').map((l, i) => (
-                      <Box key={`f${i}`} gap={1}><Text color={theme.diff.deleted}>─</Text><Text color={theme.diff.deleted}>{l.slice(0, 100)}</Text></Box>
+                      <box key={`f${i}`} gap={1}><text fg={theme.diff.deleted}>─</text><text fg={theme.diff.deleted}>{l.slice(0, 100)}</text></box>
                     ))}
                     {String(approvalRequest.args['replace'] ?? '').split('\n').map((l, i) => (
-                      <Box key={`r${i}`} gap={1}><Text color={theme.diff.added}>+</Text><Text color={theme.diff.added}>{l.slice(0, 100)}</Text></Box>
+                      <box key={`r${i}`} gap={1}><text fg={theme.diff.added}>+</text><text fg={theme.diff.added}>{l.slice(0, 100)}</text></box>
                     ))}
-                  </Box>
+                  </box>
                 )}
                 {approvalRequest.toolName === 'bash' && approvalRequest.args['command'] != null && (
-                  <Box marginTop={1}>
-                    <Text color={theme.syntax.keyword}>$ </Text>
-                    <Text color={theme.text.dim}>{String(approvalRequest.args['command']).slice(0, 120)}</Text>
-                  </Box>
+                  <box marginTop={1}>
+                    <text fg={theme.syntax.keyword}>$ </text>
+                    <text fg={theme.text.dim}>{String(approvalRequest.args['command']).slice(0, 120)}</text>
+                  </box>
                 )}
                 {approvalRequest.reasoning && (
-                  <Text color={theme.text.dim}>{approvalRequest.reasoning.slice(0, 120)}</Text>
+                  <text fg={theme.text.dim}>{approvalRequest.reasoning.slice(0, 120)}</text>
                 )}
-                <Box marginTop={1} gap={3}>
-                  <Text color={theme.status.success}>[y] Approve</Text>
-                  <Text color={theme.status.error}>[n] Deny</Text>
-                </Box>
-              </Box>
+                <box marginTop={1} gap={3}>
+                  <text fg={theme.status.success}>[y] Approve</text>
+                  <text fg={theme.status.error}>[n] Deny</text>
+                </box>
+              </box>
             )}
 
             {/* Context warning */}
             {ctxPct >= 80 && (
-              <Box borderStyle="round" flexShrink={0}
+              <box borderStyle="rounded"
                 borderColor={ctxPct >= 90 ? theme.status.error : theme.status.warning}
-                paddingX={2} marginX={1} marginTop={1}>
-                <Text color={ctxPct >= 90 ? theme.status.error : theme.status.warning}>
+                paddingLeft={2} paddingRight={2} marginLeft={1} marginTop={1}>
+                <text fg={ctxPct >= 90 ? theme.status.error : theme.status.warning}>
                   {ctxPct >= 90 ? `Context ${ctxPct}% full — /new now` : `Context ${ctxPct}% full — consider /new`}
-                </Text>
-              </Box>
+                </text>
+              </box>
             )}
-          </Box>
-        </Box>
+          </scrollbox>
+        </box>
 
-        {/* Right: sidebar — always visible because in the fixed-height row */}
+        {/* Right sidebar */}
         {useSidebar && (
-          <Box flexDirection="column" width={sideWidth} height={convH}>
+          <box flexDirection="column" width={sideWidth} height={convH}>
             <FilesPanel files={fileChanges} focused={focus === 'files'} height={filesH} />
             <ToolsPanel tools={toolLog}     focused={focus === 'tools'} height={toolsH} />
             <ContextPanel used={tokenUsage} total={contextWindow} focused={focus === 'ctx'} height={ctxH} />
-          </Box>
+          </box>
         )}
-      </Box>
+      </box>
 
-      {/* ── Command palette — shrinks convH when visible ──────── */}
+      {/* ── Command palette ── */}
       {showPalette && (
         <CommandPalette
-          onSelect={cmd => { setInput(''); handleCommand(cmd); }}
+          onSelect={cmd => { setInput(''); handleCommand(cmd); setShowPalette(false); }}
           onClose={() => setShowPalette(false)}
         />
       )}
 
-      {/* ── Input bar — 3 rows ────────────────────────────────── */}
-      <Box height={3} borderStyle="round" borderColor={inputBorder} paddingX={2}>
-        <Text color={isRunning ? theme.status.running : theme.role.user}>{'> '}</Text>
-        <Box flexGrow={1}>
-          <TextInput
-            value={input}
-            onChange={setInput}
-            onSubmit={handleSubmit}
-            placeholder={inputPlaceholder}
-            focus={focus === 'input' && !showPalette}
-          />
-        </Box>
+      {/* ── Input bar ── */}
+      <box height={3} borderStyle="rounded" borderColor={inputBorder} paddingLeft={2} paddingRight={2}>
+        <text fg={isRunning ? theme.status.running : theme.role.user}>{'> '}</text>
+        <input
+          ref={inputElRef}
+          focused={focus === 'input'}
+          placeholder={inputPlaceholder}
+          width={termCols - sideWidth - 12}
+          textColor={theme.text.primary}
+          cursorColor={theme.text.link}
+          backgroundColor="transparent"
+          focusedBackgroundColor="transparent"
+          onInput={(v: string) => setInput(v)}
+          onSubmit={() => handleSubmit()}
+        />
         {input.length > 0 && (
-          <Text color={theme.text.dim}>{input.length}</Text>
+          <text fg={theme.text.dim}>{input.length}</text>
         )}
-      </Box>
+      </box>
 
-      {/* ── Footer — 1 row ────────────────────────────────────── */}
-      <Box height={1} paddingX={2}>
-        <Text color={theme.text.dim}>{footerHint}</Text>
-      </Box>
+      {/* ── Bottom status bar (replaces AppHeader entirely) ── */}
+      <box height={1} paddingLeft={2} paddingRight={2} flexDirection="row">
+        <text fg={theme.brand}>◆ </text>
+        <text fg={theme.text.secondary}>{currentModel}</text>
+        {tokenUsage > 0 && <text fg={ctxColor}> · {ctxPct}%</text>}
+        <text fg={theme.text.dim}> · {mm}:{ss} · {CWD}</text>
+        <box flexGrow={1} />
+        <text fg={theme.text.dim}>{footerHint}</text>
+      </box>
 
-    </Box>
+    </box>
   );
 };

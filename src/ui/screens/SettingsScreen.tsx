@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Text, useInput } from 'ink';
-import TextInput from 'ink-text-input';
+import { useKeyboard } from '@opentui/react';
 import { detectBackends, checkSystemCapabilities } from '../../services/backend-detector.js';
 import type { BackendInfo, BackendType, SystemCapabilities } from '../../services/backend-detector.js';
 import {
@@ -321,9 +320,9 @@ export const SettingsScreen: React.FC<Props> = ({ onBack }) => {
     const isStop = mode.action.title.startsWith('Stop');
     const isDl   = mode.action.title.startsWith('Download');
     return (
-      <Box flexDirection="column" paddingX={2} paddingY={1}>
-        <Text bold color="#a78bfa">{mode.action.title}</Text>
-        <Text color="#555555" dimColor>Running — please wait</Text>
+      <box flexDirection="column" paddingLeft={2} paddingRight={2} paddingTop={1} paddingBottom={1}>
+        <text fg="#a78bfa"><strong>{mode.action.title}</strong></text>
+        <text fg="#555555">Running — please wait</text>
         {step && (
           <ProcessStream
             command={step.command} args={step.args}
@@ -345,7 +344,7 @@ export const SettingsScreen: React.FC<Props> = ({ onBack }) => {
             }}
           />
         )}
-      </Box>
+      </box>
     );
   }
 
@@ -438,59 +437,59 @@ const BrowseView: React.FC<BrowseViewProps> = (p) => {
     onProviderRemove, onSwitchModel, onConfigure, onBrowseCatalog,
   } = p;
 
-  useInput((input, key) => {
-    if (key.escape) { onBack(); return; }
-    if (key.tab)    { onTabChange(tabs[(tabs.indexOf(tab) + 1) % tabs.length]); return; }
+  useKeyboard((key) => {
+    if (key.name === 'escape') { onBack(); return; }
+    if (key.name === 'tab')    { onTabChange(tabs[(tabs.indexOf(tab) + 1) % tabs.length]); return; }
 
     if (tab === 'backends' && !loading) {
-      if (key.upArrow)   onSelectChange(Math.max(0, selected - 1));
-      if (key.downArrow) onSelectChange(Math.min(backends.length - 1, selected + 1));
-      if (key.return)    { const b = backends[selected]; if (b) onBackendAction(b); }
-      if (input === 'r' || input === 'R') onRefresh();
+      if (key.name === 'up')   onSelectChange(Math.max(0, selected - 1));
+      if (key.name === 'down') onSelectChange(Math.min(backends.length - 1, selected + 1));
+      if (key.name === 'return')    { const b = backends[selected]; if (b) onBackendAction(b); }
+      if (key.sequence === 'r' || key.sequence === 'R') onRefresh();
       const sel = backends[selected];
       if (sel?.status === 'running') {
-        if (input === 's' || input === 'S') onSwitchModel(sel);
-        if ((input === 'c' || input === 'C') && sel.type !== 'ollama' && sel.type !== 'lmstudio') onConfigure(sel);
+        if (key.sequence === 's' || key.sequence === 'S') onSwitchModel(sel);
+        if ((key.sequence === 'c' || key.sequence === 'C') && sel.type !== 'ollama' && sel.type !== 'lmstudio') onConfigure(sel);
       }
     }
 
     if (tab === 'providers') {
-      if (key.upArrow)   onProviderSelectChange(Math.max(0, providerSelected - 1));
-      if (key.downArrow) onProviderSelectChange(Math.min(CLOUD_PROVIDERS.length - 1, providerSelected + 1));
+      if (key.name === 'up')   onProviderSelectChange(Math.max(0, providerSelected - 1));
+      if (key.name === 'down') onProviderSelectChange(Math.min(CLOUD_PROVIDERS.length - 1, providerSelected + 1));
       const cpd = CLOUD_PROVIDERS[providerSelected];
       if (!cpd) return;
-      if (key.return)               onProviderAction(cpd);
-      if (input === 'k' || input === 'K') onProviderEditKey(cpd);
-      if (input === 'm' || input === 'M') onProviderChangeModel(cpd);
-      if (input === 'x' || input === 'X') onProviderRemove(cpd).catch(() => {});
+      if (key.name === 'return')               onProviderAction(cpd);
+      if (key.sequence === 'k' || key.sequence === 'K') onProviderEditKey(cpd);
+      if (key.sequence === 'm' || key.sequence === 'M') onProviderChangeModel(cpd);
+      if (key.sequence === 'x' || key.sequence === 'X') onProviderRemove(cpd).catch(() => {});
     }
 
     if (tab === 'models') {
-      if (key.return || input === 'd' || input === 'D') onBrowseCatalog();
+      if (key.name === 'return' || key.sequence === 'd' || key.sequence === 'D') onBrowseCatalog();
     }
   });
 
   return (
-    <Box flexDirection="column">
-      <Box gap={3} paddingX={2} paddingY={1} borderStyle="single" borderColor="#2a2a2a">
-        <Text color="#a78bfa" bold>settings</Text>
-        <Text color="#333333">·</Text>
+    <box flexDirection="column">
+      <box gap={3} paddingLeft={2} paddingRight={2} paddingTop={1} paddingBottom={1} borderStyle="single" borderColor="#2a2a2a">
+        <text fg="#a78bfa"><strong>settings</strong></text>
+        <text fg="#333333">·</text>
         {tabs.map(t => (
-          <Text key={t} color={tab === t ? '#e8e8e8' : '#555555'} bold={tab === t}>
-            {tab === t ? `[${t}]` : t}
-          </Text>
+          tab === t
+            ? <text key={t} fg="#e8e8e8"><strong>{`[${t}]`}</strong></text>
+            : <text key={t} fg="#555555">{t}</text>
         ))}
-        <Box flexGrow={1} />
-        <Text color="#333333" dimColor>Tab · Esc back</Text>
-      </Box>
+        <box flexGrow={1} />
+        <text fg="#333333">Tab · Esc back</text>
+      </box>
 
       {tab === 'backends'  && <BackendsTab  backends={backends} loading={loading} selected={selected} caps={caps} />}
       {tab === 'providers' && <ProvidersTab providerEntries={providerEntries} selected={providerSelected} />}
       {tab === 'models'    && <ModelsTab    backends={backends} loading={loading} />}
       {tab === 'cookbooks' && <CookbooksTab />}
 
-      <Box paddingX={2} marginTop={1}>
-        <Text color="#333333" dimColor>
+      <box paddingLeft={2} paddingRight={2} marginTop={1}>
+        <text fg="#333333">
           {tab === 'backends'
             ? '↑↓ select  ↵ install/start/stop  s switch  c configure  r refresh  Tab switch  Esc back'
             : tab === 'providers'
@@ -498,9 +497,9 @@ const BrowseView: React.FC<BrowseViewProps> = (p) => {
               : tab === 'models'
                 ? '↵ browse model catalog  Tab switch  Esc back'
                 : 'Tab switch  Esc back'}
-        </Text>
-      </Box>
-    </Box>
+        </text>
+      </box>
+    </box>
   );
 };
 
@@ -510,7 +509,7 @@ const BrowseView: React.FC<BrowseViewProps> = (p) => {
 const BackendsTab: React.FC<{
   backends: BackendInfo[]; loading: boolean; selected: number; caps: SystemCapabilities;
 }> = ({ backends, loading, selected, caps }) => {
-  if (loading) return <Box paddingX={2} paddingY={1}><Text color="#555555">detecting backends…</Text></Box>;
+  if (loading) return <box paddingLeft={2} paddingRight={2} paddingTop={1} paddingBottom={1}><text fg="#555555">detecting backends…</text></box>;
 
   const sel = backends[selected];
 
@@ -529,59 +528,64 @@ const BackendsTab: React.FC<{
   };
 
   return (
-    <Box flexDirection="column" paddingX={2} paddingY={1} gap={1}>
-      <Box gap={3}>
-        <Text color="#444444" dimColor>system</Text>
-        <Text color={caps.hasCuda   ? '#22c55e' : '#555555'}>CUDA {caps.hasCuda   ? '✓' : '✗'}</Text>
-        <Text color={caps.hasDocker ? '#22c55e' : '#555555'}>Docker {caps.hasDocker ? '✓' : '✗'}</Text>
-        <Text color={caps.hasNvidiaContainerToolkit ? '#22c55e' : '#555555'}>nvidia-ct {caps.hasNvidiaContainerToolkit ? '✓' : '✗'}</Text>
-        {caps.pythonVersion && <Text color="#444444">{caps.pythonVersion}</Text>}
-      </Box>
+    <box flexDirection="column" paddingLeft={2} paddingRight={2} paddingTop={1} paddingBottom={1} gap={1}>
+      <box gap={3}>
+        <text fg="#444444">system</text>
+        <text fg={caps.hasCuda   ? '#22c55e' : '#555555'}>CUDA {caps.hasCuda   ? '✓' : '✗'}</text>
+        <text fg={caps.hasDocker ? '#22c55e' : '#555555'}>Docker {caps.hasDocker ? '✓' : '✗'}</text>
+        <text fg={caps.hasNvidiaContainerToolkit ? '#22c55e' : '#555555'}>nvidia-ct {caps.hasNvidiaContainerToolkit ? '✓' : '✗'}</text>
+        {caps.pythonVersion && <text fg="#444444">{caps.pythonVersion}</text>}
+      </box>
 
-      <Box flexDirection="column">
+      <box flexDirection="column">
         {backends.map((b, i) => {
           const isSel = i === selected;
           return (
-            <Box key={b.type} gap={2} paddingX={1}>
-              <Text color={isSel ? '#a78bfa' : '#333333'}>{isSel ? '▶' : ' '}</Text>
-              <Box width={22}><Text color={isSel ? '#e8e8e8' : '#777777'} bold={isSel}>{b.label}</Text></Box>
-              <Box width={20}><Text color={STATUS_COLOR[b.status]}>{STATUS_LABEL[b.status]}</Text></Box>
-              <Box width={8}><Text color="#444444">:{b.port}</Text></Box>
-              <Text color={isSel ? '#666666' : '#333333'}>{actionHint(b)}</Text>
-            </Box>
+            <box key={b.type} gap={2} paddingLeft={1} paddingRight={1}>
+              <text fg={isSel ? '#a78bfa' : '#333333'}>{isSel ? '▶' : ' '}</text>
+              <box width={22}>
+                {isSel
+                  ? <text fg="#e8e8e8"><strong>{b.label}</strong></text>
+                  : <text fg="#777777">{b.label}</text>
+                }
+              </box>
+              <box width={20}><text fg={STATUS_COLOR[b.status]}>{STATUS_LABEL[b.status]}</text></box>
+              <box width={8}><text fg="#444444">:{b.port}</text></box>
+              <text fg={isSel ? '#666666' : '#333333'}>{actionHint(b)}</text>
+            </box>
           );
         })}
-      </Box>
+      </box>
 
       {sel && (
-        <Box flexDirection="column" marginTop={1} paddingX={2} paddingY={1} borderStyle="single" borderColor="#2a2a2a">
-          <Box gap={2}>
-            <Text bold color="#e8e8e8">{sel.label}</Text>
-            {sel.runningInDocker && <Text color="#444444" dimColor>(container: blonde-{sel.type})</Text>}
-          </Box>
-          <Text color="#555555">{DESCRIPTIONS[sel.type]}</Text>
+        <box flexDirection="column" marginTop={1} paddingLeft={2} paddingRight={2} paddingTop={1} paddingBottom={1} borderStyle="single" borderColor="#2a2a2a">
+          <box gap={2}>
+            <text fg="#e8e8e8"><strong>{sel.label}</strong></text>
+            {sel.runningInDocker && <text fg="#444444">(container: blonde-{sel.type})</text>}
+          </box>
+          <text fg="#555555">{DESCRIPTIONS[sel.type]}</text>
           {sel.status === 'running' && sel.models.length > 0 && (
-            <Box marginTop={1} gap={2}>
-              <Text color="#444444">models:</Text>
-              <Text color="#4a9eff">
+            <box marginTop={1} gap={2}>
+              <text fg="#444444">models:</text>
+              <text fg="#4a9eff">
                 {sel.models.slice(0, 5).map(m => m.size ? `${m.id} (${m.size})` : m.id).join(' · ')}
                 {sel.models.length > 5 ? ` +${sel.models.length - 5}` : ''}
-              </Text>
-            </Box>
+              </text>
+            </box>
           )}
           {sel.type === 'lmstudio' && sel.status === 'installed' && (
-            <Box flexDirection="column" marginTop={1} gap={0}>
-              <Text color="#f59e0b">LM Studio detected — local server not started</Text>
-              <Text color="#555555">In LM Studio: open the <Text color="#e8e8e8">Developer</Text> tab → click <Text color="#e8e8e8">Start Server</Text></Text>
-              <Text color="#555555">Then press <Text color="#e8e8e8">r</Text> to refresh this screen.</Text>
-            </Box>
+            <box flexDirection="column" marginTop={1} gap={0}>
+              <text fg="#f59e0b">LM Studio detected — local server not started</text>
+              <text fg="#555555">In LM Studio: open the <text fg="#e8e8e8">Developer</text> tab → click <text fg="#e8e8e8">Start Server</text></text>
+              <text fg="#555555">Then press <text fg="#e8e8e8">r</text> to refresh this screen.</text>
+            </box>
           )}
           {sel.type === 'lmstudio' && sel.status === 'not-installed' && (
-            <Box marginTop={1}><Text color="#444444" dimColor>Download from lmstudio.ai — enable its local server, then return here</Text></Box>
+            <box marginTop={1}><text fg="#444444">Download from lmstudio.ai — enable its local server, then return here</text></box>
           )}
-        </Box>
+        </box>
       )}
-    </Box>
+    </box>
   );
 };
 
@@ -596,68 +600,73 @@ const ProvidersTab: React.FC<{
   const selEntry = sel ? providerEntries.find(e => e.type === sel.providerType) : undefined;
 
   return (
-    <Box flexDirection="column" paddingX={2} paddingY={1} gap={1}>
-      <Text color="#555555" dimColor>Cloud providers — API keys stored in ~/.blonde/providers.json</Text>
+    <box flexDirection="column" paddingLeft={2} paddingRight={2} paddingTop={1} paddingBottom={1} gap={1}>
+      <text fg="#555555">Cloud providers — API keys stored in ~/.blonde/providers.json</text>
 
-      <Box flexDirection="column" gap={0}>
+      <box flexDirection="column" gap={0}>
         {CLOUD_PROVIDERS.map((cpd, i) => {
           const entry  = providerEntries.find(e => e.type === cpd.providerType);
           const isSel  = i === selected;
           const configured = !!entry?.apiKey;
           return (
-            <Box key={cpd.type} gap={2} paddingX={1} paddingY={0}>
-              <Text color={isSel ? '#a78bfa' : '#333333'}>{isSel ? '▶' : ' '}</Text>
-              <Box width={14}><Text color={isSel ? '#e8e8e8' : '#777777'} bold={isSel}>{cpd.label}</Text></Box>
-              <Box width={20}>
-                <Text color={configured ? '#22c55e' : '#555555'}>
+            <box key={cpd.type} gap={2} paddingLeft={1} paddingRight={1} paddingTop={0} paddingBottom={0}>
+              <text fg={isSel ? '#a78bfa' : '#333333'}>{isSel ? '▶' : ' '}</text>
+              <box width={14}>
+                {isSel
+                  ? <text fg="#e8e8e8"><strong>{cpd.label}</strong></text>
+                  : <text fg="#777777">{cpd.label}</text>
+                }
+              </box>
+              <box width={20}>
+                <text fg={configured ? '#22c55e' : '#555555'}>
                   {configured ? '● configured' : '○ not configured'}
-                </Text>
-              </Box>
+                </text>
+              </box>
               {configured && entry?.model && (
-                <Box width={36}><Text color="#4a9eff">{entry.model}</Text></Box>
+                <box width={36}><text fg="#4a9eff">{entry.model}</text></box>
               )}
-              {entry?.isActive && <Text color="#f59e0b" bold>ACTIVE</Text>}
-            </Box>
+              {entry?.isActive && <text fg="#f59e0b"><strong>ACTIVE</strong></text>}
+            </box>
           );
         })}
-      </Box>
+      </box>
 
       {sel && (
-        <Box flexDirection="column" marginTop={1} paddingX={2} paddingY={1} borderStyle="single" borderColor="#2a2a2a">
-          <Text bold color="#e8e8e8">{sel.label}</Text>
-          <Text color="#555555">{sel.desc}</Text>
+        <box flexDirection="column" marginTop={1} paddingLeft={2} paddingRight={2} paddingTop={1} paddingBottom={1} borderStyle="single" borderColor="#2a2a2a">
+          <text fg="#e8e8e8"><strong>{sel.label}</strong></text>
+          <text fg="#555555">{sel.desc}</text>
 
           {selEntry?.apiKey ? (
-            <Box flexDirection="column" marginTop={1} gap={0}>
-              <Box gap={2}>
-                <Text color="#444444">key:</Text>
-                <Text color="#4a9eff">{maskKey(selEntry.apiKey)}</Text>
-              </Box>
-              <Box gap={2}>
-                <Text color="#444444">model:</Text>
-                <Text color="#e8e8e8">{selEntry.model}</Text>
-              </Box>
-              <Box gap={2}>
-                <Text color="#444444">env var:</Text>
-                <Text color="#555555" dimColor>{sel.keyEnvVar}</Text>
-              </Box>
-              <Box marginTop={1} gap={4}>
-                <Text color="#a78bfa">↵ {selEntry.isActive ? 'deactivate' : 'set active'}</Text>
-                <Text color="#555555">k edit key</Text>
-                <Text color="#555555">m model</Text>
-                <Text color="#ef4444">x remove</Text>
-              </Box>
-            </Box>
+            <box flexDirection="column" marginTop={1} gap={0}>
+              <box gap={2}>
+                <text fg="#444444">key:</text>
+                <text fg="#4a9eff">{maskKey(selEntry.apiKey)}</text>
+              </box>
+              <box gap={2}>
+                <text fg="#444444">model:</text>
+                <text fg="#e8e8e8">{selEntry.model}</text>
+              </box>
+              <box gap={2}>
+                <text fg="#444444">env var:</text>
+                <text fg="#555555">{sel.keyEnvVar}</text>
+              </box>
+              <box marginTop={1} gap={4}>
+                <text fg="#a78bfa">↵ {selEntry.isActive ? 'deactivate' : 'set active'}</text>
+                <text fg="#555555">k edit key</text>
+                <text fg="#555555">m model</text>
+                <text fg="#ef4444">x remove</text>
+              </box>
+            </box>
           ) : (
-            <Box flexDirection="column" marginTop={1} gap={0}>
-              <Text color="#555555">key format: <Text color="#444444">{sel.keyHint}</Text></Text>
-              <Text color="#555555">env var:    <Text color="#444444">{sel.keyEnvVar}</Text></Text>
-              <Box marginTop={1}><Text color="#a78bfa">↵ or k — enter API key to configure</Text></Box>
-            </Box>
+            <box flexDirection="column" marginTop={1} gap={0}>
+              <text fg="#555555">key format: <text fg="#444444">{sel.keyHint}</text></text>
+              <text fg="#555555">env var:    <text fg="#444444">{sel.keyEnvVar}</text></text>
+              <box marginTop={1}><text fg="#a78bfa">↵ or k — enter API key to configure</text></box>
+            </box>
           )}
-        </Box>
+        </box>
       )}
-    </Box>
+    </box>
   );
 };
 
@@ -672,26 +681,27 @@ const ApiKeyInputView: React.FC<{
   onCancel:    () => void;
 }> = ({ providerDef, editMode, onSubmit, onCancel }) => {
   const [value, setValue] = useState('');
-  useInput((_, key) => { if (key.escape) onCancel(); });
+  useKeyboard((key) => { if (key.name === 'escape') onCancel(); });
   return (
-    <Box flexDirection="column" paddingX={2} paddingY={1} gap={1} borderStyle="double" borderColor="#a78bfa">
-      <Text bold color="#e8e8e8">{editMode ? 'Update' : 'Add'} {providerDef.label} API Key</Text>
-      <Text color="#555555">{providerDef.desc}</Text>
-      <Box flexDirection="column" marginTop={1} gap={0}>
-        <Text color="#444444">Key format:  <Text color="#555555">{providerDef.keyHint}</Text></Text>
-        <Text color="#444444">Env var:     <Text color="#555555">{providerDef.keyEnvVar}</Text></Text>
-        <Text color="#444444">Stored at:   <Text color="#555555">~/.blonde/providers.json (not committed to git)</Text></Text>
-      </Box>
-      <Box borderStyle="round" borderColor="#4a9eff" paddingX={2} marginTop={1}>
-        <Text color="#a78bfa">{'→ '}</Text>
-        <TextInput
-          value={value} onChange={setValue}
-          onSubmit={(v) => { if (v.trim()) onSubmit(v.trim()); }}
+    <box flexDirection="column" paddingLeft={2} paddingRight={2} paddingTop={1} paddingBottom={1} gap={1} borderStyle="double" borderColor="#a78bfa">
+      <text fg="#e8e8e8"><strong>{editMode ? 'Update' : 'Add'} {providerDef.label} API Key</strong></text>
+      <text fg="#555555">{providerDef.desc}</text>
+      <box flexDirection="column" marginTop={1} gap={0}>
+        <text fg="#444444">Key format:  <text fg="#555555">{providerDef.keyHint}</text></text>
+        <text fg="#444444">Env var:     <text fg="#555555">{providerDef.keyEnvVar}</text></text>
+        <text fg="#444444">Stored at:   <text fg="#555555">~/.blonde/providers.json (not committed to git)</text></text>
+      </box>
+      <box borderStyle="rounded" borderColor="#4a9eff" paddingLeft={2} paddingRight={2} marginTop={1}>
+        <text fg="#a78bfa">{'→ '}</text>
+        <input
+          value={value} onInput={(v: string) => setValue(v)}
+          onSubmit={(v: any) => { if (typeof v === 'string' && v.trim()) onSubmit(v.trim()); }}
           placeholder={providerDef.keyHint}
+          width={40}
         />
-      </Box>
-      <Text color="#333333" dimColor>Paste your API key and press ↵  ·  Esc cancel</Text>
-    </Box>
+      </box>
+      <text fg="#333333">Paste your API key and press ↵  ·  Esc cancel</text>
+    </box>
   );
 };
 
@@ -710,48 +720,49 @@ const CloudModelSelectView: React.FC<{
   const [customMode,  setCustomMode]  = useState(false);
   const [customValue, setCustomValue] = useState('');
 
-  useInput((input, key) => {
+  useKeyboard((key) => {
     if (customMode) {
-      if (key.escape) setCustomMode(false);
+      if (key.name === 'escape') setCustomMode(false);
       return;
     }
-    if (key.escape)    { onCancel(); return; }
-    if (key.upArrow)   setSelIdx(i => Math.max(0, i - 1));
-    if (key.downArrow) setSelIdx(i => Math.min(providerDef.models.length, i + 1)); // +1 = custom slot
-    if (key.return) {
+    if (key.name === 'escape')    { onCancel(); return; }
+    if (key.name === 'up')   setSelIdx(i => Math.max(0, i - 1));
+    if (key.name === 'down') setSelIdx(i => Math.min(providerDef.models.length, i + 1)); // +1 = custom slot
+    if (key.name === 'return') {
       if (selIdx < providerDef.models.length) onSelect(providerDef.models[selIdx]);
       else setCustomMode(true);
     }
-    if (input === 'c' || input === 'C') { setSelIdx(providerDef.models.length); setCustomMode(true); }
+    if (key.sequence === 'c' || key.sequence === 'C') { setSelIdx(providerDef.models.length); setCustomMode(true); }
   });
 
   const isCustomSlot = selIdx === providerDef.models.length;
 
   return (
-    <Box flexDirection="column" paddingX={2} paddingY={1} gap={1} borderStyle="double" borderColor="#a78bfa">
-      <Text bold color="#e8e8e8">Select Model — {providerDef.label}</Text>
-      <Box flexDirection="column">
+    <box flexDirection="column" paddingLeft={2} paddingRight={2} paddingTop={1} paddingBottom={1} gap={1} borderStyle="double" borderColor="#a78bfa">
+      <text fg="#e8e8e8"><strong>Select Model — {providerDef.label}</strong></text>
+      <box flexDirection="column">
         {providerDef.models.map((m, i) => (
-          <Box key={m} gap={2}>
-            <Text color={i === selIdx ? '#a78bfa' : '#333333'}>{i === selIdx ? '▶' : ' '}</Text>
-            <Text color={i === selIdx ? '#e8e8e8' : '#777777'}>{m}</Text>
-            {m === currentModel && <Text color="#f59e0b">current</Text>}
-          </Box>
+          <box key={m} gap={2}>
+            <text fg={i === selIdx ? '#a78bfa' : '#333333'}>{i === selIdx ? '▶' : ' '}</text>
+            <text fg={i === selIdx ? '#e8e8e8' : '#777777'}>{m}</text>
+            {m === currentModel && <text fg="#f59e0b">current</text>}
+          </box>
         ))}
-        <Box gap={2}>
-          <Text color={isCustomSlot ? '#a78bfa' : '#333333'}>{isCustomSlot ? '▶' : ' '}</Text>
+        <box gap={2}>
+          <text fg={isCustomSlot ? '#a78bfa' : '#333333'}>{isCustomSlot ? '▶' : ' '}</text>
           {customMode
-            ? <Box borderStyle="round" borderColor="#4a9eff" paddingX={1}>
-                <TextInput value={customValue} onChange={setCustomValue}
-                  onSubmit={(v) => { if (v.trim()) onSelect(v.trim()); }}
-                  placeholder="enter custom model ID" />
-              </Box>
-            : <Text color={isCustomSlot ? '#e8e8e8' : '#555555'}>custom model ID  <Text color="#333333" dimColor>(press c)</Text></Text>
+            ? <box borderStyle="rounded" borderColor="#4a9eff" paddingLeft={1} paddingRight={1}>
+                <input value={customValue} onInput={(v: string) => setCustomValue(v)}
+                  onSubmit={(v: any) => { if (typeof v === 'string' && v.trim()) onSelect(v.trim()); }}
+                  placeholder="enter custom model ID"
+                  width={40} />
+              </box>
+            : <text fg={isCustomSlot ? '#e8e8e8' : '#555555'}>custom model ID  <text fg="#333333">(press c)</text></text>
           }
-        </Box>
-      </Box>
-      <Text color="#333333" dimColor>↑↓ select  ↵ confirm  c custom  Esc back</Text>
-    </Box>
+        </box>
+      </box>
+      <text fg="#333333">↑↓ select  ↵ confirm  c custom  Esc back</text>
+    </box>
   );
 };
 
@@ -759,35 +770,35 @@ const CloudModelSelectView: React.FC<{
 // ModelsTab
 // ─────────────────────────────────────────────────────────────────
 const ModelsTab: React.FC<{ backends: BackendInfo[]; loading: boolean }> = ({ backends, loading }) => {
-  if (loading) return <Box paddingX={2} paddingY={1}><Text color="#555555">loading…</Text></Box>;
+  if (loading) return <box paddingLeft={2} paddingRight={2} paddingTop={1} paddingBottom={1}><text fg="#555555">loading…</text></box>;
   const running = backends.filter(b => b.status === 'running');
   return (
-    <Box flexDirection="column" paddingX={2} paddingY={1} gap={1}>
+    <box flexDirection="column" paddingLeft={2} paddingRight={2} paddingTop={1} paddingBottom={1} gap={1}>
       {running.length === 0
-        ? <Text color="#555555">No local backends running. Start one in the Backends tab first.</Text>
+        ? <text fg="#555555">No local backends running. Start one in the Backends tab first.</text>
         : running.map(b => (
-          <Box key={b.type} flexDirection="column">
-            <Text bold color="#a78bfa">{b.label}</Text>
+          <box key={b.type} flexDirection="column">
+            <text fg="#a78bfa"><strong>{b.label}</strong></text>
             {b.models.length === 0
-              ? <Text color="#555555">  no models loaded</Text>
+              ? <text fg="#555555">  no models loaded</text>
               : b.models.map(m => (
-                <Box key={m.id} gap={3} paddingX={2}>
-                  <Text color="#e8e8e8">{m.id}</Text>
-                  {m.size && <Text color="#444444">{m.size}</Text>}
-                </Box>
+                <box key={m.id} gap={3} paddingLeft={2} paddingRight={2}>
+                  <text fg="#e8e8e8">{m.id}</text>
+                  {m.size && <text fg="#444444">{m.size}</text>}
+                </box>
               ))
             }
-          </Box>
+          </box>
         ))
       }
-      <Box marginTop={1} paddingX={2} paddingY={1} borderStyle="single" borderColor="#333333">
-        <Box flexDirection="column">
-          <Text bold color="#e8e8e8">Browse & Download Models</Text>
-          <Text color="#555555">Curated catalog — Ollama · HuggingFace · GGUF (bartowski)</Text>
-          <Box marginTop={1}><Text color="#a78bfa" dimColor>↵ open catalog</Text></Box>
-        </Box>
-      </Box>
-    </Box>
+      <box marginTop={1} paddingLeft={2} paddingRight={2} paddingTop={1} paddingBottom={1} borderStyle="single" borderColor="#333333">
+        <box flexDirection="column">
+          <text fg="#e8e8e8"><strong>Browse & Download Models</strong></text>
+          <text fg="#555555">Curated catalog — Ollama · HuggingFace · GGUF (bartowski)</text>
+          <box marginTop={1}><text fg="#a78bfa">↵ open catalog</text></box>
+        </box>
+      </box>
+    </box>
   );
 };
 
@@ -803,21 +814,21 @@ const COOKBOOKS = [
 ];
 
 const CookbooksTab: React.FC = () => (
-  <Box flexDirection="column" paddingX={2} paddingY={1} gap={1}>
-    <Text color="#555555" dimColor>Built-in presets — tuned for local inference</Text>
+  <box flexDirection="column" paddingLeft={2} paddingRight={2} paddingTop={1} paddingBottom={1} gap={1}>
+    <text fg="#555555">Built-in presets — tuned for local inference</text>
     {COOKBOOKS.map(c => (
-      <Box key={c.name} flexDirection="column" paddingX={2} paddingY={1} borderStyle="single" borderColor="#2a2a2a">
-        <Box gap={3}>
-          <Text bold color="#a78bfa">{c.name}</Text>
-          <Text color="#4a9eff">{c.model}</Text>
-          <Text color="#444444">temp {c.temp}</Text>
-          <Text color="#444444">ctx {c.ctx}</Text>
-        </Box>
-        <Text color="#555555">{c.desc}</Text>
-      </Box>
+      <box key={c.name} flexDirection="column" paddingLeft={2} paddingRight={2} paddingTop={1} paddingBottom={1} borderStyle="single" borderColor="#2a2a2a">
+        <box gap={3}>
+          <text fg="#a78bfa"><strong>{c.name}</strong></text>
+          <text fg="#4a9eff">{c.model}</text>
+          <text fg="#444444">temp {c.temp}</text>
+          <text fg="#444444">ctx {c.ctx}</text>
+        </box>
+        <text fg="#555555">{c.desc}</text>
+      </box>
     ))}
-    <Text color="#333333" dimColor>Custom cookbooks: ~/.blonde/cookbooks/*.json  (coming soon)</Text>
-  </Box>
+    <text fg="#333333">Custom cookbooks: ~/.blonde/cookbooks/*.json  (coming soon)</text>
+  </box>
 );
 
 // ─────────────────────────────────────────────────────────────────
@@ -832,35 +843,38 @@ const SwitchModelView: React.FC<{
   const [method, setMethod] = useState<InstallMethod>(backend.runningInDocker ? 'docker' : 'native');
   const [config, setConfig] = useState<BackendConfig | null>(null);
   useEffect(() => { loadConfig(backend.type).then(setConfig).catch(() => {}); }, [backend.type]);
-  useInput((_, key) => {
-    if (key.escape) { onCancel(); return; }
-    if (key.leftArrow || key.rightArrow) {
+  useKeyboard((key) => {
+    if (key.name === 'escape') { onCancel(); return; }
+    if (key.name === 'left' || key.name === 'right') {
       if (supportsDocker(backend.type)) setMethod(m => m === 'docker' ? 'native' : 'docker');
     }
   });
   return (
-    <Box flexDirection="column" paddingX={2} paddingY={1} gap={1} borderStyle="double" borderColor="#a78bfa">
-      <Text bold color="#e8e8e8">Switch Model — {backend.label}</Text>
-      {config?.model && <Text color="#555555">current: {config.model}</Text>}
+    <box flexDirection="column" paddingLeft={2} paddingRight={2} paddingTop={1} paddingBottom={1} gap={1} borderStyle="double" borderColor="#a78bfa">
+      <text fg="#e8e8e8"><strong>Switch Model — {backend.label}</strong></text>
+      {config?.model && <text fg="#555555">current: {config.model}</text>}
       {supportsDocker(backend.type) && (
-        <Box gap={3} marginTop={1}>
-          <Text color="#444444">Method:</Text>
+        <box gap={3} marginTop={1}>
+          <text fg="#444444">Method:</text>
           {(['docker', 'native'] as InstallMethod[]).map(m => (
-            <Text key={m} color={method === m ? '#a78bfa' : '#444444'} bold={method === m}>{method === m ? `[${m}]` : m}</Text>
+            method === m
+              ? <text key={m} fg="#a78bfa"><strong>{`[${m}]`}</strong></text>
+              : <text key={m} fg="#444444">{m}</text>
           ))}
-          <Text color="#333333" dimColor>← →</Text>
-        </Box>
+          <text fg="#333333">← →</text>
+        </box>
       )}
-      <Box marginTop={1}><Text color="#555555">New model:</Text></Box>
-      <Text color="#444444" dimColor>{MODEL_PLACEHOLDER[backend.type]}</Text>
-      <Box borderStyle="round" borderColor="#4a9eff" paddingX={2}>
-        <Text color="#a78bfa">{'→ '}</Text>
-        <TextInput value={value} onChange={setValue}
-          onSubmit={(v) => { if (v.trim()) onConfirm(v.trim(), method, config?.flags ?? {}); }}
-          placeholder={MODEL_PLACEHOLDER[backend.type]} />
-      </Box>
-      <Text color="#333333" dimColor>↵ confirm  Esc back{supportsDocker(backend.type) ? '  ← → method' : ''}</Text>
-    </Box>
+      <box marginTop={1}><text fg="#555555">New model:</text></box>
+      <text fg="#444444">{MODEL_PLACEHOLDER[backend.type]}</text>
+      <box borderStyle="rounded" borderColor="#4a9eff" paddingLeft={2} paddingRight={2}>
+        <text fg="#a78bfa">{'→ '}</text>
+        <input value={value} onInput={(v: string) => setValue(v)}
+          onSubmit={(v: any) => { if (typeof v === 'string' && v.trim()) onConfirm(v.trim(), method, config?.flags ?? {}); }}
+          placeholder={MODEL_PLACEHOLDER[backend.type]}
+          width={40} />
+      </box>
+      <text fg="#333333">↵ confirm  Esc back{supportsDocker(backend.type) ? '  ← → method' : ''}</text>
+    </box>
   );
 };
 
@@ -893,23 +907,23 @@ const ConfigureView: React.FC<{
     }).catch(() => {});
   }, [backend.type]);
 
-  useInput((_, key) => {
+  useKeyboard((key) => {
     if (isEditing) {
-      if (key.return) {
+      if (key.name === 'return') {
         if (focusIdx === 0) setModel(editValue);
         else setFields(f => f.map((fi, i) => i === focusIdx - 1 ? { ...fi, value: editValue } : fi));
         setIsEditing(false);
       }
-      if (key.escape) setIsEditing(false);
+      if (key.name === 'escape') setIsEditing(false);
       return;
     }
-    if (key.escape) { onCancel(); return; }
-    if (key.upArrow)   setFocusIdx(i => Math.max(0, i - 1));
-    if (key.downArrow) setFocusIdx(i => Math.min(CANCEL_IDX, i + 1));
-    if (key.leftArrow || key.rightArrow) {
+    if (key.name === 'escape') { onCancel(); return; }
+    if (key.name === 'up')   setFocusIdx(i => Math.max(0, i - 1));
+    if (key.name === 'down') setFocusIdx(i => Math.min(CANCEL_IDX, i + 1));
+    if (key.name === 'left' || key.name === 'right') {
       if (supportsDocker(backend.type)) setMethod(m => m === 'docker' ? 'native' : 'docker');
     }
-    if (key.return) {
+    if (key.name === 'return') {
       if (focusIdx === APPLY_IDX) {
         const flags: Record<string, string> = {};
         fields.forEach(f => { if (f.value) flags[f.def.key] = f.value; });
@@ -927,50 +941,68 @@ const ConfigureView: React.FC<{
   const cu = (i: number) => i === focusIdx ? '▶' : ' ';
 
   return (
-    <Box flexDirection="column" paddingX={2} paddingY={1} borderStyle="double" borderColor="#a78bfa">
-      <Text bold color="#e8e8e8">Configure {backend.label}</Text>
+    <box flexDirection="column" paddingLeft={2} paddingRight={2} paddingTop={1} paddingBottom={1} borderStyle="double" borderColor="#a78bfa">
+      <text fg="#e8e8e8"><strong>Configure {backend.label}</strong></text>
       {supportsDocker(backend.type) && (
-        <Box gap={3} marginTop={1} marginBottom={1}>
-          <Text color="#444444">Method:</Text>
+        <box gap={3} marginTop={1} marginBottom={1}>
+          <text fg="#444444">Method:</text>
           {(['docker', 'native'] as InstallMethod[]).map(m => (
-            <Text key={m} color={method === m ? '#a78bfa' : '#444444'} bold={method === m}>{method === m ? `[${m}]` : m}</Text>
+            method === m
+              ? <text key={m} fg="#a78bfa"><strong>{`[${m}]`}</strong></text>
+              : <text key={m} fg="#444444">{m}</text>
           ))}
-          <Text color="#333333" dimColor>← →</Text>
-        </Box>
+          <text fg="#333333">← →</text>
+        </box>
       )}
-      <Box gap={2}>
-        <Text color={rc(0)}>{cu(0)}</Text>
-        <Box width={14}><Text color={rc(0)} bold={focusIdx === 0}>model</Text></Box>
-        <Box borderStyle={focusIdx === 0 && isEditing ? 'round' : undefined} borderColor="#4a9eff" paddingX={focusIdx === 0 && isEditing ? 1 : 0}>
-          {focusIdx === 0 && isEditing
-            ? <TextInput value={editValue} onChange={setEditValue} onSubmit={() => { setModel(editValue); setIsEditing(false); }} placeholder="model name or path" />
-            : <Text color={rc(0)}>{model || '(not set)'}</Text>
+      <box gap={2}>
+        <text fg={rc(0)}>{cu(0)}</text>
+        <box width={14}>
+          {focusIdx === 0
+            ? <text fg={rc(0)}><strong>model</strong></text>
+            : <text fg={rc(0)}>model</text>
           }
-        </Box>
-        <Text color="#333333" dimColor>model to load</Text>
-      </Box>
+        </box>
+        <box borderStyle={focusIdx === 0 && isEditing ? 'rounded' : undefined} borderColor="#4a9eff" paddingLeft={focusIdx === 0 && isEditing ? 1 : 0} paddingRight={focusIdx === 0 && isEditing ? 1 : 0}>
+          {focusIdx === 0 && isEditing
+            ? <input value={editValue} onInput={(v: string) => setEditValue(v)} onSubmit={() => { setModel(editValue); setIsEditing(false); }} placeholder="model name or path" width={40} />
+            : <text fg={rc(0)}>{model || '(not set)'}</text>
+          }
+        </box>
+        <text fg="#333333">model to load</text>
+      </box>
       {fields.map((f, i) => {
         const ri = i + 1; const isFoc = focusIdx === ri;
         return (
-          <Box key={f.def.key} gap={2}>
-            <Text color={rc(ri)}>{cu(ri)}</Text>
-            <Box width={14}><Text color={rc(ri)} bold={isFoc}>{f.def.label}</Text></Box>
-            <Box borderStyle={isFoc && isEditing ? 'round' : undefined} borderColor="#4a9eff" paddingX={isFoc && isEditing ? 1 : 0}>
-              {isFoc && isEditing
-                ? <TextInput value={editValue} onChange={setEditValue} onSubmit={() => { setFields(fs => fs.map((fi, j) => j === i ? { ...fi, value: editValue } : fi)); setIsEditing(false); }} placeholder={f.def.default} />
-                : <Text color={f.value ? rc(ri) : '#444444'}>{f.value || f.def.default}</Text>
+          <box key={f.def.key} gap={2}>
+            <text fg={rc(ri)}>{cu(ri)}</text>
+            <box width={14}>
+              {isFoc
+                ? <text fg={rc(ri)}><strong>{f.def.label}</strong></text>
+                : <text fg={rc(ri)}>{f.def.label}</text>
               }
-            </Box>
-            <Text color="#333333" dimColor>{f.def.desc}</Text>
-          </Box>
+            </box>
+            <box borderStyle={isFoc && isEditing ? 'rounded' : undefined} borderColor="#4a9eff" paddingLeft={isFoc && isEditing ? 1 : 0} paddingRight={isFoc && isEditing ? 1 : 0}>
+              {isFoc && isEditing
+                ? <input value={editValue} onInput={(v: string) => setEditValue(v)} onSubmit={() => { setFields(fs => fs.map((fi, j) => j === i ? { ...fi, value: editValue } : fi)); setIsEditing(false); }} placeholder={f.def.default} width={40} />
+                : <text fg={f.value ? rc(ri) : '#444444'}>{f.value || f.def.default}</text>
+              }
+            </box>
+            <text fg="#333333">{f.def.desc}</text>
+          </box>
         );
       })}
-      <Box gap={4} marginTop={1}>
-        <Text color={focusIdx === APPLY_IDX ? '#22c55e' : '#444444'} bold={focusIdx === APPLY_IDX}>{focusIdx === APPLY_IDX ? '▶ ' : '  '}Apply & Restart</Text>
-        <Text color={focusIdx === CANCEL_IDX ? '#ef4444' : '#444444'} bold={focusIdx === CANCEL_IDX}>{focusIdx === CANCEL_IDX ? '▶ ' : '  '}Cancel</Text>
-      </Box>
-      <Text color="#333333" dimColor>↑↓ navigate  ↵ edit/confirm  Esc cancel</Text>
-    </Box>
+      <box gap={4} marginTop={1}>
+        {focusIdx === APPLY_IDX
+          ? <text fg="#22c55e"><strong>▶ Apply & Restart</strong></text>
+          : <text fg="#444444">  Apply & Restart</text>
+        }
+        {focusIdx === CANCEL_IDX
+          ? <text fg="#ef4444"><strong>▶ Cancel</strong></text>
+          : <text fg="#444444">  Cancel</text>
+        }
+      </box>
+      <text fg="#333333">↑↓ navigate  ↵ edit/confirm  Esc cancel</text>
+    </box>
   );
 };
 
@@ -997,89 +1029,92 @@ const CatalogView: React.FC<{
   const selected = CATALOG[modelIdx];
   const options  = selected ? getDownloadOptions(selected) : [];
 
-  useInput((_, key) => {
-    if (key.escape) { if (phase === 'options') { setPhase('list'); return; } onCancel(); return; }
+  useKeyboard((key) => {
+    if (key.name === 'escape') { if (phase === 'options') { setPhase('list'); return; } onCancel(); return; }
     if (phase === 'list') {
-      if (key.upArrow) {
+      if (key.name === 'up') {
         const next = Math.max(0, modelIdx - 1);
         setModelIdx(next);
         if (next < scroll) setScroll(next);
       }
-      if (key.downArrow) {
+      if (key.name === 'down') {
         const next = Math.min(CATALOG.length - 1, modelIdx + 1);
         setModelIdx(next);
         if (next >= scroll + MAX_VISIBLE) setScroll(next - MAX_VISIBLE + 1);
       }
-      if (key.return && selected) setPhase('options');
+      if (key.name === 'return' && selected) setPhase('options');
     } else {
-      if (key.upArrow)   setOptIdx(i => Math.max(0, i - 1));
-      if (key.downArrow) setOptIdx(i => Math.min(options.length - 1, i + 1));
-      if (key.return && options[optIdx]) onDownload(options[optIdx]);
+      if (key.name === 'up')   setOptIdx(i => Math.max(0, i - 1));
+      if (key.name === 'down') setOptIdx(i => Math.min(options.length - 1, i + 1));
+      if (key.name === 'return' && options[optIdx]) onDownload(options[optIdx]);
     }
   });
 
   const visible = CATALOG.slice(scroll, scroll + MAX_VISIBLE);
 
   return (
-    <Box flexDirection="column" paddingX={1} paddingY={1}>
-      <Box gap={3} borderStyle="single" borderColor="#2a2a2a" paddingX={2} paddingY={1}>
-        <Text bold color="#a78bfa">Model Catalog</Text>
-        <Text color="#555555">{CATALOG.length} models · Ollama · HuggingFace · GGUF</Text>
-        <Box flexGrow={1} /><Text color="#333333" dimColor>Esc back</Text>
-      </Box>
-      <Box flexDirection="row" gap={2} marginTop={1}>
-        <Box flexDirection="column" width={36}>
+    <box flexDirection="column" paddingLeft={1} paddingRight={1} paddingTop={1} paddingBottom={1}>
+      <box gap={3} borderStyle="single" borderColor="#2a2a2a" paddingLeft={2} paddingRight={2} paddingTop={1} paddingBottom={1}>
+        <text fg="#a78bfa"><strong>Model Catalog</strong></text>
+        <text fg="#555555">{CATALOG.length} models · Ollama · HuggingFace · GGUF</text>
+        <box flexGrow={1} /><text fg="#333333">Esc back</text>
+      </box>
+      <box flexDirection="row" gap={2} marginTop={1}>
+        <box flexDirection="column" width={36}>
           {visible.map((m, vi) => {
             const absIdx = scroll + vi; const isSel = absIdx === modelIdx;
             return (
-              <Box key={m.id} gap={1}>
-                <Text color={isSel ? '#a78bfa' : '#333333'}>{isSel ? '▶' : ' '}</Text>
-                <Box flexDirection="column">
-                  <Text color={isSel ? '#e8e8e8' : '#777777'} bold={isSel}>{m.name}</Text>
-                  <Box gap={1}>
-                    <Text color="#444444">{m.minVram}</Text>
-                    {m.tags.slice(0, 2).map(t => <Text key={t} color={TAG_COLOR[t] ?? '#555555'}>{t}</Text>)}
-                  </Box>
-                </Box>
-              </Box>
+              <box key={m.id} gap={1}>
+                <text fg={isSel ? '#a78bfa' : '#333333'}>{isSel ? '▶' : ' '}</text>
+                <box flexDirection="column">
+                  {isSel
+                    ? <text fg="#e8e8e8"><strong>{m.name}</strong></text>
+                    : <text fg="#777777">{m.name}</text>
+                  }
+                  <box gap={1}>
+                    <text fg="#444444">{m.minVram}</text>
+                    {m.tags.slice(0, 2).map(t => <text key={t} fg={TAG_COLOR[t] ?? '#555555'}>{t}</text>)}
+                  </box>
+                </box>
+              </box>
             );
           })}
-          {CATALOG.length > MAX_VISIBLE && <Text color="#333333" dimColor>  {scroll + MAX_VISIBLE < CATALOG.length ? '↓ more' : '─ end'}</Text>}
-        </Box>
+          {CATALOG.length > MAX_VISIBLE && <text fg="#333333">  {scroll + MAX_VISIBLE < CATALOG.length ? '↓ more' : '─ end'}</text>}
+        </box>
         {selected && (
-          <Box flexDirection="column" flexGrow={1} paddingX={2} paddingY={1} borderStyle="single" borderColor="#2a2a2a">
-            <Text bold color="#e8e8e8">{selected.name}</Text>
-            <Text color="#555555">{selected.family}  ·  min {selected.minVram}</Text>
-            <Box marginTop={1}><Text color="#888888">{selected.desc}</Text></Box>
+          <box flexDirection="column" flexGrow={1} paddingLeft={2} paddingRight={2} paddingTop={1} paddingBottom={1} borderStyle="single" borderColor="#2a2a2a">
+            <text fg="#e8e8e8"><strong>{selected.name}</strong></text>
+            <text fg="#555555">{selected.family}  ·  min {selected.minVram}</text>
+            <box marginTop={1}><text fg="#888888">{selected.desc}</text></box>
             {phase === 'list'
-              ? <Box marginTop={1}><Text color="#a78bfa" dimColor>↵ see download options</Text></Box>
+              ? <box marginTop={1}><text fg="#a78bfa">↵ see download options</text></box>
               : (
-                <Box flexDirection="column" marginTop={1} gap={0}>
-                  <Text color="#555555">Download as:</Text>
+                <box flexDirection="column" marginTop={1} gap={0}>
+                  <text fg="#555555">Download as:</text>
                   {options.map((opt, i) => (
-                    <Box key={i} flexDirection="column">
-                      <Box gap={1}>
-                        <Text color={i === optIdx ? '#a78bfa' : '#444444'}>{i === optIdx ? '▶' : ' '}</Text>
-                        <Text color={i === optIdx ? '#e8e8e8' : '#777777'}>{opt.label}</Text>
-                      </Box>
-                      {opt.note && i === optIdx && <Text color="#444444" dimColor>  {opt.note}</Text>}
-                    </Box>
+                    <box key={i} flexDirection="column">
+                      <box gap={1}>
+                        <text fg={i === optIdx ? '#a78bfa' : '#444444'}>{i === optIdx ? '▶' : ' '}</text>
+                        <text fg={i === optIdx ? '#e8e8e8' : '#777777'}>{opt.label}</text>
+                      </box>
+                      {opt.note && i === optIdx && <text fg="#444444">  {opt.note}</text>}
+                    </box>
                   ))}
                   {hfCliOk === false && options.some(o => o.format !== 'ollama') && (
-                    <Box marginTop={1} flexDirection="column">
-                      <Text color="#f59e0b">⚠ huggingface-cli not found</Text>
-                      <Text color="#444444" dimColor>pip3 install huggingface-hub</Text>
-                    </Box>
+                    <box marginTop={1} flexDirection="column">
+                      <text fg="#f59e0b">⚠ huggingface-cli not found</text>
+                      <text fg="#444444">pip3 install huggingface-hub</text>
+                    </box>
                   )}
-                  <Box marginTop={1}><Text color="#333333" dimColor>↑↓ select  ↵ download  Esc back</Text></Box>
-                </Box>
+                  <box marginTop={1}><text fg="#333333">↑↓ select  ↵ download  Esc back</text></box>
+                </box>
               )
             }
-          </Box>
+          </box>
         )}
-      </Box>
-      <Box marginTop={1}><Text color="#333333" dimColor>↑↓ navigate  ↵ select  Esc back</Text></Box>
-    </Box>
+      </box>
+      <box marginTop={1}><text fg="#333333">↑↓ navigate  ↵ select  Esc back</text></box>
+    </box>
   );
 };
 
@@ -1091,30 +1126,33 @@ const MethodSelectView: React.FC<{
   onSelect: (m: InstallMethod) => void; onCancel: () => void;
 }> = ({ backend, intent, onSelect, onCancel }) => {
   const [sel, setSel] = useState<InstallMethod>('docker');
-  useInput((_, key) => {
-    if (key.upArrow || key.downArrow || key.leftArrow || key.rightArrow) setSel(m => m === 'docker' ? 'native' : 'docker');
-    if (key.return) onSelect(sel);
-    if (key.escape) onCancel();
+  useKeyboard((key) => {
+    if (key.name === 'up' || key.name === 'down' || key.name === 'left' || key.name === 'right') setSel(m => m === 'docker' ? 'native' : 'docker');
+    if (key.name === 'return') onSelect(sel);
+    if (key.name === 'escape') onCancel();
   });
   const opts = [
     { id: 'docker' as const, label: 'Docker  (recommended)', desc: 'Official image. Isolated. Requires Docker + nvidia-container-toolkit.' },
     { id: 'native' as const, label: 'Native  (pip)',         desc: 'pip install. No Docker needed. May conflict with existing PyTorch.'   },
   ];
   return (
-    <Box flexDirection="column" paddingX={2} paddingY={1} gap={1} borderStyle="double" borderColor="#a78bfa">
-      <Text bold color="#e8e8e8">{intent === 'install' ? 'Install' : 'Start'} {backend.label}</Text>
-      <Text color="#666666">Choose install method:</Text>
+    <box flexDirection="column" paddingLeft={2} paddingRight={2} paddingTop={1} paddingBottom={1} gap={1} borderStyle="double" borderColor="#a78bfa">
+      <text fg="#e8e8e8"><strong>{intent === 'install' ? 'Install' : 'Start'} {backend.label}</strong></text>
+      <text fg="#666666">Choose install method:</text>
       {opts.map(m => (
-        <Box key={m.id} gap={2} marginTop={1}>
-          <Text color={sel === m.id ? '#a78bfa' : '#333333'}>{sel === m.id ? '▶' : ' '}</Text>
-          <Box flexDirection="column">
-            <Text color={sel === m.id ? '#e8e8e8' : '#777777'} bold={sel === m.id}>{m.label}</Text>
-            <Text color="#444444">{m.desc}</Text>
-          </Box>
-        </Box>
+        <box key={m.id} gap={2} marginTop={1}>
+          <text fg={sel === m.id ? '#a78bfa' : '#333333'}>{sel === m.id ? '▶' : ' '}</text>
+          <box flexDirection="column">
+            {sel === m.id
+              ? <text fg="#e8e8e8"><strong>{m.label}</strong></text>
+              : <text fg="#777777">{m.label}</text>
+            }
+            <text fg="#444444">{m.desc}</text>
+          </box>
+        </box>
       ))}
-      <Box marginTop={1}><Text color="#333333" dimColor>↑↓ select  ↵ confirm  Esc back</Text></Box>
-    </Box>
+      <box marginTop={1}><text fg="#333333">↑↓ select  ↵ confirm  Esc back</text></box>
+    </box>
   );
 };
 
@@ -1126,20 +1164,21 @@ const ModelInputView: React.FC<{
   onSubmit: (model: string) => void; onCancel: () => void;
 }> = ({ backend, method, onSubmit, onCancel }) => {
   const [value, setValue] = useState('');
-  useInput((_, key) => { if (key.escape) onCancel(); });
+  useKeyboard((key) => { if (key.name === 'escape') onCancel(); });
   return (
-    <Box flexDirection="column" paddingX={2} paddingY={1} gap={1} borderStyle="double" borderColor="#a78bfa">
-      <Text bold color="#e8e8e8">Start {backend.label} ({method})</Text>
-      <Text color="#666666">Enter a model to load:</Text>
-      <Text color="#444444" dimColor>{MODEL_PLACEHOLDER[backend.type]}</Text>
-      <Box borderStyle="round" borderColor="#4a9eff" paddingX={2} marginTop={1}>
-        <Text color="#a78bfa">{'→ '}</Text>
-        <TextInput value={value} onChange={setValue}
-          onSubmit={(v) => { if (v.trim()) onSubmit(v.trim()); }}
-          placeholder={MODEL_PLACEHOLDER[backend.type]} />
-      </Box>
-      <Box marginTop={1}><Text color="#333333" dimColor>↵ confirm  Esc back</Text></Box>
-    </Box>
+    <box flexDirection="column" paddingLeft={2} paddingRight={2} paddingTop={1} paddingBottom={1} gap={1} borderStyle="double" borderColor="#a78bfa">
+      <text fg="#e8e8e8"><strong>Start {backend.label} ({method})</strong></text>
+      <text fg="#666666">Enter a model to load:</text>
+      <text fg="#444444">{MODEL_PLACEHOLDER[backend.type]}</text>
+      <box borderStyle="rounded" borderColor="#4a9eff" paddingLeft={2} paddingRight={2} marginTop={1}>
+        <text fg="#a78bfa">{'→ '}</text>
+        <input value={value} onInput={(v: string) => setValue(v)}
+          onSubmit={(v: any) => { if (typeof v === 'string' && v.trim()) onSubmit(v.trim()); }}
+          placeholder={MODEL_PLACEHOLDER[backend.type]}
+          width={40} />
+      </box>
+      <box marginTop={1}><text fg="#333333">↵ confirm  Esc back</text></box>
+    </box>
   );
 };
 
@@ -1151,39 +1190,45 @@ const PermissionView: React.FC<{
 }> = ({ action, onConfirm, onCancel }) => {
   const [focus, setFocus] = useState<'confirm' | 'cancel'>('confirm');
   const allMet = action.requirements.every(r => r.met);
-  useInput((_, key) => {
-    if (key.upArrow || key.downArrow || key.leftArrow || key.rightArrow) setFocus(f => f === 'confirm' ? 'cancel' : 'confirm');
-    if (key.return)  focus === 'confirm' ? onConfirm() : onCancel();
-    if (key.escape)  onCancel();
+  useKeyboard((key) => {
+    if (key.name === 'up' || key.name === 'down' || key.name === 'left' || key.name === 'right') setFocus(f => f === 'confirm' ? 'cancel' : 'confirm');
+    if (key.name === 'return')  focus === 'confirm' ? onConfirm() : onCancel();
+    if (key.name === 'escape')  onCancel();
   });
   return (
-    <Box flexDirection="column" paddingX={2} paddingY={1} gap={1} borderStyle="double" borderColor="#a78bfa">
-      <Text bold color="#e8e8e8">{action.title}</Text>
+    <box flexDirection="column" paddingLeft={2} paddingRight={2} paddingTop={1} paddingBottom={1} gap={1} borderStyle="double" borderColor="#a78bfa">
+      <text fg="#e8e8e8"><strong>{action.title}</strong></text>
       {action.requirements.length > 0 && (
-        <Box flexDirection="column">
-          <Text color="#555555">Requirements:</Text>
+        <box flexDirection="column">
+          <text fg="#555555">Requirements:</text>
           {action.requirements.map((r, i) => (
-            <Box key={i} gap={2}>
-              <Text color={r.met ? '#22c55e' : '#ef4444'}>{r.met ? '✓' : '✗'}</Text>
-              <Text color={r.met ? '#aaaaaa' : '#ef4444'}>{r.name}</Text>
-              {!r.met && r.hint && <Text color="#444444" dimColor>— {r.hint}</Text>}
-            </Box>
+            <box key={i} gap={2}>
+              <text fg={r.met ? '#22c55e' : '#ef4444'}>{r.met ? '✓' : '✗'}</text>
+              <text fg={r.met ? '#aaaaaa' : '#ef4444'}>{r.name}</text>
+              {!r.met && r.hint && <text fg="#444444">— {r.hint}</text>}
+            </box>
           ))}
-        </Box>
+        </box>
       )}
-      <Box flexDirection="column">
-        <Text color="#555555">Will run:</Text>
+      <box flexDirection="column">
+        <text fg="#555555">Will run:</text>
         {action.steps.map((s, i) => (
-          <Text key={i} color="#e8e8e8">  {s.command} {s.args.slice(0, 6).join(' ')}{s.args.length > 6 ? ' …' : ''}</Text>
+          <text key={i} fg="#e8e8e8">  {s.command} {s.args.slice(0, 6).join(' ')}{s.args.length > 6 ? ' …' : ''}</text>
         ))}
-      </Box>
-      {!allMet && <Text color="#f59e0b">⚠  Some requirements unmet — may fail.</Text>}
-      <Box gap={4} marginTop={1}>
-        <Text color={focus === 'confirm' ? '#a78bfa' : '#444444'} bold={focus === 'confirm'}>{focus === 'confirm' ? '▶ ' : '  '}Run</Text>
-        <Text color={focus === 'cancel'  ? '#ef4444' : '#444444'} bold={focus === 'cancel'} >{focus === 'cancel'  ? '▶ ' : '  '}Cancel</Text>
-      </Box>
-      <Box marginTop={1}><Text color="#333333" dimColor>↑↓ select  ↵ confirm  Esc cancel</Text></Box>
-    </Box>
+      </box>
+      {!allMet && <text fg="#f59e0b">⚠  Some requirements unmet — may fail.</text>}
+      <box gap={4} marginTop={1}>
+        {focus === 'confirm'
+          ? <text fg="#a78bfa"><strong>▶ Run</strong></text>
+          : <text fg="#444444">  Run</text>
+        }
+        {focus === 'cancel'
+          ? <text fg="#ef4444"><strong>▶ Cancel</strong></text>
+          : <text fg="#444444">  Cancel</text>
+        }
+      </box>
+      <box marginTop={1}><text fg="#333333">↑↓ select  ↵ confirm  Esc cancel</text></box>
+    </box>
   );
 };
 
@@ -1201,60 +1246,61 @@ const LmStudioModelSelectView: React.FC<{
   const [customMode,  setCustomMode]  = useState(false);
   const [customValue, setCustomValue] = useState('');
 
-  useInput((input, key) => {
+  useKeyboard((key) => {
     if (customMode) {
-      if (key.escape) setCustomMode(false);
+      if (key.name === 'escape') setCustomMode(false);
       return;
     }
-    if (key.escape)    { onCancel(); return; }
-    if (key.upArrow)   setSelIdx(i => Math.max(0, i - 1));
-    if (key.downArrow) setSelIdx(i => Math.min(totalSlots - 1, i + 1));
-    if (key.return) {
+    if (key.name === 'escape')    { onCancel(); return; }
+    if (key.name === 'up')   setSelIdx(i => Math.max(0, i - 1));
+    if (key.name === 'down') setSelIdx(i => Math.min(totalSlots - 1, i + 1));
+    if (key.name === 'return') {
       if (selIdx < models.length) onSelect(models[selIdx].id);
       else setCustomMode(true);
     }
-    if (input === 'c' || input === 'C') { setSelIdx(models.length); setCustomMode(true); }
+    if (key.sequence === 'c' || key.sequence === 'C') { setSelIdx(models.length); setCustomMode(true); }
   });
 
   const isCustomSlot = selIdx === models.length;
 
   return (
-    <Box flexDirection="column" paddingX={2} paddingY={1} gap={1} borderStyle="double" borderColor="#a78bfa">
-      <Text bold color="#e8e8e8">LM Studio — Select Model</Text>
-      <Text color="#555555">Models available from LM Studio local server (port 1234)</Text>
+    <box flexDirection="column" paddingLeft={2} paddingRight={2} paddingTop={1} paddingBottom={1} gap={1} borderStyle="double" borderColor="#a78bfa">
+      <text fg="#e8e8e8"><strong>LM Studio — Select Model</strong></text>
+      <text fg="#555555">Models available from LM Studio local server (port 1234)</text>
 
       {models.length === 0 ? (
-        <Box flexDirection="column" marginTop={1} gap={0}>
-          <Text color="#f59e0b">⚠  No models detected</Text>
-          <Text color="#555555">Load a model in LM Studio → Local Server tab, then come back.</Text>
-          <Text color="#555555">Or enter a custom model ID below.</Text>
-        </Box>
+        <box flexDirection="column" marginTop={1} gap={0}>
+          <text fg="#f59e0b">⚠  No models detected</text>
+          <text fg="#555555">Load a model in LM Studio → Local Server tab, then come back.</text>
+          <text fg="#555555">Or enter a custom model ID below.</text>
+        </box>
       ) : (
-        <Box flexDirection="column" marginTop={1}>
+        <box flexDirection="column" marginTop={1}>
           {models.map((m, i) => (
-            <Box key={m.id} gap={2}>
-              <Text color={i === selIdx ? '#a78bfa' : '#333333'}>{i === selIdx ? '▶' : ' '}</Text>
-              <Text color={i === selIdx ? '#e8e8e8' : '#777777'}>{m.id}</Text>
-              {m.size && <Text color="#444444">{m.size}</Text>}
-            </Box>
+            <box key={m.id} gap={2}>
+              <text fg={i === selIdx ? '#a78bfa' : '#333333'}>{i === selIdx ? '▶' : ' '}</text>
+              <text fg={i === selIdx ? '#e8e8e8' : '#777777'}>{m.id}</text>
+              {m.size && <text fg="#444444">{m.size}</text>}
+            </box>
           ))}
-        </Box>
+        </box>
       )}
 
-      <Box gap={2} marginTop={models.length === 0 ? 1 : 0}>
-        <Text color={isCustomSlot ? '#a78bfa' : '#333333'}>{isCustomSlot ? '▶' : ' '}</Text>
+      <box gap={2} marginTop={models.length === 0 ? 1 : 0}>
+        <text fg={isCustomSlot ? '#a78bfa' : '#333333'}>{isCustomSlot ? '▶' : ' '}</text>
         {customMode
-          ? <Box borderStyle="round" borderColor="#4a9eff" paddingX={1}>
-              <TextInput value={customValue} onChange={setCustomValue}
-                onSubmit={(v) => { if (v.trim()) onSelect(v.trim()); }}
-                placeholder="enter model ID (e.g. lmstudio-community/Meta-Llama-3-8B)" />
-            </Box>
-          : <Text color={isCustomSlot ? '#e8e8e8' : '#555555'}>custom model ID  <Text color="#333333" dimColor>(press c)</Text></Text>
+          ? <box borderStyle="rounded" borderColor="#4a9eff" paddingLeft={1} paddingRight={1}>
+              <input value={customValue} onInput={(v: string) => setCustomValue(v)}
+                onSubmit={(v: any) => { if (typeof v === 'string' && v.trim()) onSelect(v.trim()); }}
+                placeholder="enter model ID (e.g. lmstudio-community/Meta-Llama-3-8B)"
+                width={40} />
+            </box>
+          : <text fg={isCustomSlot ? '#e8e8e8' : '#555555'}>custom model ID  <text fg="#333333">(press c)</text></text>
         }
-      </Box>
+      </box>
 
-      <Text color="#333333" dimColor>↑↓ select  ↵ use model  c custom  Esc back</Text>
-    </Box>
+      <text fg="#333333">↑↓ select  ↵ use model  c custom  Esc back</text>
+    </box>
   );
 };
 
@@ -1262,18 +1308,18 @@ const LmStudioModelSelectView: React.FC<{
 // ResultView
 // ─────────────────────────────────────────────────────────────────
 const ResultView: React.FC<{ success: boolean; message: string; onDone: () => void }> = ({ success, message, onDone }) => {
-  useInput((_, key) => { if (key.return || key.escape) onDone(); });
+  useKeyboard((key) => { if (key.name === 'return' || key.name === 'escape') onDone(); });
   return (
-    <Box flexDirection="column" paddingX={2} paddingY={1} gap={1} borderStyle="double" borderColor={success ? '#22c55e' : '#ef4444'}>
-      <Text bold color={success ? '#22c55e' : '#ef4444'}>{success ? '✓  Done' : '✗  Failed'}</Text>
-      <Text color="#aaaaaa">{message}</Text>
+    <box flexDirection="column" paddingLeft={2} paddingRight={2} paddingTop={1} paddingBottom={1} gap={1} borderStyle="double" borderColor={success ? '#22c55e' : '#ef4444'}>
+      <text fg={success ? '#22c55e' : '#ef4444'}><strong>{success ? '✓  Done' : '✗  Failed'}</strong></text>
+      <text fg="#aaaaaa">{message}</text>
       {success && (
-        <Box flexDirection="column" marginTop={1}>
-          <Text color="#555555">Active provider is used automatically for all future sessions.</Text>
-          <Text color="#555555">Use /provider to view or switch providers in-session.</Text>
-        </Box>
+        <box flexDirection="column" marginTop={1}>
+          <text fg="#555555">Active provider is used automatically for all future sessions.</text>
+          <text fg="#555555">Use /provider to view or switch providers in-session.</text>
+        </box>
       )}
-      <Box marginTop={1}><Text color="#333333" dimColor>↵ or Esc to continue</Text></Box>
-    </Box>
+      <box marginTop={1}><text fg="#333333">↵ or Esc to continue</text></box>
+    </box>
   );
 };

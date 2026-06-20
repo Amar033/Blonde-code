@@ -1,9 +1,11 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 import 'dotenv/config';
-import React from 'react';
-import { render } from 'ink';
-import { App } from './App.js';
+import { createCliRenderer } from '@opentui/core';
+import { createRoot } from '@opentui/react';
 import { appendFileSync } from 'fs';
+import React from 'react';
+import { App } from './App.js';
+
 const _LOG = '/tmp/blonde.log';
 const _fmt = (...args: any[]) =>
   args.map(a => a instanceof Error ? a.message : typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
@@ -13,27 +15,13 @@ console.warn  = (...args) => { try { appendFileSync(_LOG, `[WRN] ${_fmt(...args)
 
 const mockMode = process.argv.includes('--mock');
 
-if (!process.stdout.isTTY) {
-  process.stderr.write('Warning: Not running in a TTY. Some features may not work correctly.\n');
-}
+const renderer = await createCliRenderer({
+  exitOnCtrlC: false,
+  exitSignals: ['SIGTERM', 'SIGQUIT', 'SIGABRT', 'SIGHUP'],
+});
 
-const { unmount, waitUntilExit } = render(<App mockMode={mockMode} />, { strict: false } as any);
+renderer.setTerminalTitle('Blonde');
+renderer.setBackgroundColor('#0d0d0d');
 
-function restoreTerminal() {
-  process.stdout.write('\x1b[?25h');
-  process.stdout.write('\x1b[0m');
-  process.stdout.write('\n');
-}
-
-let shuttingDown = false;
-async function shutdown() {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  unmount();
-  restoreTerminal();
-  try { await waitUntilExit(); } catch {}
-  process.exit(0);
-}
-
-process.on('SIGINT',  () => shutdown());
-process.on('SIGTERM', () => shutdown());
+const root = createRoot(renderer);
+root.render(React.createElement(App, { mockMode }));

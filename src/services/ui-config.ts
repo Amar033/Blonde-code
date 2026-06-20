@@ -5,7 +5,12 @@ import { homedir } from 'os';
 const CONFIG_PATH = join(homedir(), '.blonde', 'ui-config.json');
 
 export interface UiConfig {
-  banner?: string;
+  banner?:    string;
+  logoIndex?: number;
+  /** Custom ASCII art lines shown on the startup screen (replaces default BLONDE art) */
+  brandArt?:  string[];
+  /** Static greeting override — skips AI greeting generation */
+  greeting?:  string;
 }
 
 export async function loadUiConfig(): Promise<UiConfig> {
