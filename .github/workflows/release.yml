@@ -44,7 +44,7 @@ jobs:
       # bun install only pulls the arm64 native, so we force-install the x64 one.
       - name: Install darwin-x64 native package (cross-arch only)
         if: matrix.target == 'bun-darwin-x64'
-        run: npm install --ignore-scripts @opentui/core-darwin-x64
+        run: npm install --ignore-scripts --legacy-peer-deps @opentui/core-darwin-x64
 
       - name: Inject version into src/version.ts
         shell: bash
