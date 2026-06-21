@@ -36,7 +36,7 @@ const RULES: Rule[] = [
   // File editing / creation / refactoring
   {
     pattern: /\b(edit|modify|change|update|fix|add|remove|replace|rewrite|create|write|append|insert|patch)\b/i,
-    tools: ['read_file', 'write_file', 'edit_file', 'list_files', 'git_diff', 'search_codebase'],
+    tools: ['read_file', 'write_file', 'edit_file', 'replace_block', 'list_files', 'git_diff', 'search_codebase'],
   },
   // File delete / rename / move
   {
@@ -64,8 +64,6 @@ const CONVERSATIONAL_RE =
 export function isConversational(input: string): boolean {
   const t = input.trim();
   if (t.length === 0) return true;
-  // Single-word / very short messages are almost always conversational
-  if (t.length <= 5 && !/\w+\s+\w+/.test(t)) return true;
   return CONVERSATIONAL_RE.test(t);
 }
 

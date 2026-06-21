@@ -1,9 +1,10 @@
-import type {LLMProvider, LLMCallOptions, LLMStreamDelta} from './providers/base.js';
+import type {LLMProvider, LLMCallOptions, LLMStreamDelta, LLMResponse} from './providers/base.js';
 import type { ConversationTurn } from '../runtime/core.js';
 
-// Chunk yielded by planStream / actStream
+// Chunk yielded by planStream / actStream.
+// `delta` is only the new text from this iteration; `accumulated` is the full response so far.
 export type StreamChunk =
-  | { type: 'token'; content: string; thinking?: string; inThinkBlock: boolean }
+  | { type: 'token'; delta: string; accumulated: string; thinking?: string; inThinkBlock: boolean }
   | { type: 'done';  response: PlannerResponse };
 
 // Extracts <think>...</think> from a partial stream in real time.
@@ -44,6 +45,10 @@ export class LLMClient {
 
   setRepoMap(map: string): void {
     this.repoMap = map;
+  }
+
+  callProvider(prompt: string, options?: LLMCallOptions): Promise<LLMResponse> {
+    return this.provider.call(prompt, options);
   }
 
   getTokenUsage(): number {
@@ -220,11 +225,11 @@ Respond ONLY with valid JSON (no markdown fences, no extra text).`,
     }
 
     let accumulated = '';
-    for await (const delta of this.provider.stream!(prompt, opts)) {
-      if (delta.type === 'content') {
-        accumulated += delta.content;
+    for await (const chunk of this.provider.stream!(prompt, opts)) {
+      if (chunk.type === 'content') {
+        accumulated += chunk.content;
         const { thinking, inThinkBlock } = extractThinkingLive(accumulated);
-        yield { type: 'token', content: accumulated, thinking, inThinkBlock };
+        yield { type: 'token', delta: chunk.content, accumulated, thinking, inThinkBlock };
       }
     }
     yield { type: 'done', response: this.parseResponse(accumulated) };
@@ -368,11 +373,11 @@ ${forceSynthesis ? '10. STOP NOW — provide your final answer immediately.' : '
     }
 
     let accumulated = '';
-    for await (const delta of this.provider.stream!(prompt, opts)) {
-      if (delta.type === 'content') {
-        accumulated += delta.content;
+    for await (const chunk of this.provider.stream!(prompt, opts)) {
+      if (chunk.type === 'content') {
+        accumulated += chunk.content;
         const { thinking, inThinkBlock } = extractThinkingLive(accumulated);
-        yield { type: 'token', content: accumulated, thinking, inThinkBlock };
+        yield { type: 'token', delta: chunk.content, accumulated, thinking, inThinkBlock };
       }
     }
     yield { type: 'done', response: this.parseResponse(accumulated) };

@@ -80,28 +80,31 @@ export class BashTool extends BaseTool {
     timeout: 30,
   };
 
-  private isCommandAllowed(command: string): { allowed: boolean; reason?: string } {
+  // Hard denylist — these patterns are blocked regardless of user approval.
+  private isDenied(command: string): { denied: boolean; reason?: string } {
     const lowerCommand = command.toLowerCase().trim();
-    
-    // Check denylist first (takes priority)
     for (const denied of this.bashConfig.deniedCommands) {
       if (lowerCommand.includes(denied.toLowerCase())) {
-        return { allowed: false, reason: `Command matches denied pattern: ${denied}` };
+        return { denied: true, reason: `Command matches denied pattern: ${denied}` };
       }
     }
+    return { denied: false };
+  }
 
-    // Check allowlist
+  // Soft allowlist — used by fakeRun to decide whether to surface an approval prompt.
+  // execute() does NOT use this check; it relies on the requiresApproval gate instead.
+  private isCommandAllowed(command: string): { allowed: boolean; reason?: string } {
+    const denial = this.isDenied(command);
+    if (denial.denied) return { allowed: false, reason: denial.reason };
+
+    const lowerCommand = command.toLowerCase().trim();
     const baseCommand = lowerCommand.split(' ')[0];
-    const isAllowed = this.bashConfig.allowedCommands.some(allowed => 
-      lowerCommand.startsWith(allowed.toLowerCase()) || 
+    const isAllowed = this.bashConfig.allowedCommands.some(allowed =>
+      lowerCommand.startsWith(allowed.toLowerCase()) ||
       baseCommand === allowed.toLowerCase()
     );
 
-    if (isAllowed) {
-      return { allowed: true };
-    }
-
-    // Not in allowlist - require approval
+    if (isAllowed) return { allowed: true };
     return { allowed: false, reason: 'Command not in allowed list - requires approval' };
   }
 
@@ -134,13 +137,13 @@ export class BashTool extends BaseTool {
 
     const timeoutMs = (timeout || this.bashConfig.timeout) * 1000;
 
-    // Security check
-    const securityCheck = this.isCommandAllowed(command);
-    if (!securityCheck.allowed) {
+    // Hard denylist check — runs even after user approval.
+    const denial = this.isDenied(command);
+    if (denial.denied) {
       return {
         success: false,
         output: null,
-        error: securityCheck.reason || 'Command not allowed for security reasons',
+        error: denial.reason || 'Command blocked by security policy',
       };
     }
 

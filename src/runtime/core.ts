@@ -152,7 +152,7 @@ export class AgentRuntime {
         .map(t => `${t.role === 'user' ? 'User' : 'Assistant'}: ${t.content}`)
         .join('\n');
 
-      const res = await this.llmClient['provider'].call(
+      const res = await this.llmClient.callProvider(
         `Summarise this conversation history in 2-4 sentences. Focus on what files were edited, what tools were called, what errors were found, and what was accomplished. Be specific about file names and outcomes.\n\n${block}`,
         { mode: 'plan', maxTokens: 300, temperature: 0.3 }
       );
@@ -442,7 +442,7 @@ export class AgentRuntime {
       for await (const chunk of this.llmClient!.planStream(input, history)) {
         signal.throwIfAborted();
         if (chunk.type === 'token') {
-          const ev: AgentEvent = { type: 'llm_streaming', delta: chunk.content, thinking: chunk.thinking, inThinkBlock: chunk.inThinkBlock };
+          const ev: AgentEvent = { type: 'llm_streaming', delta: chunk.delta, thinking: chunk.thinking, inThinkBlock: chunk.inThinkBlock };
           yield ev;
           this.emit(ev);
         } else {
@@ -597,7 +597,7 @@ export class AgentRuntime {
         )) {
           signal.throwIfAborted();
           if (chunk.type === 'token') {
-            const ev: AgentEvent = { type: 'llm_streaming', delta: chunk.content, thinking: chunk.thinking, inThinkBlock: chunk.inThinkBlock };
+            const ev: AgentEvent = { type: 'llm_streaming', delta: chunk.delta, thinking: chunk.thinking, inThinkBlock: chunk.inThinkBlock };
             yield ev;
             this.emit(ev);
           } else {

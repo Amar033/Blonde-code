@@ -1,4 +1,4 @@
-import { writeFileSync, renameSync, chmodSync } from 'fs';
+import { writeFileSync, renameSync, chmodSync, unlinkSync } from 'fs';
 import { VERSION, GITHUB_REPO } from '../version.js';
 
 export interface UpdateInfo {
@@ -94,10 +94,16 @@ export async function downloadAndInstall(
 
   const buf = Buffer.concat(chunks);
   writeFileSync(tmpPath, buf);
-  chmodSync(tmpPath, 0o755);
 
-  // Atomic replace — works on Linux/macOS even while the binary is running
-  renameSync(tmpPath, execPath);
+  // Atomic replace — works on Linux/macOS even while the binary is running.
+  // Clean up the temp file if chmod or rename fails so it doesn't linger.
+  try {
+    chmodSync(tmpPath, 0o755);
+    renameSync(tmpPath, execPath);
+  } catch (e) {
+    try { unlinkSync(tmpPath); } catch {}
+    throw e;
+  }
 
   _pendingUpdate = null;
 }

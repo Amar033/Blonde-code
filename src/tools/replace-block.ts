@@ -8,22 +8,9 @@ function isBlocked(p: string): boolean {
   return BLOCKED.some(b => p.includes(b));
 }
 
-// Normalize a block of code for fuzzy matching:
-// - Collapse all leading whitespace per line to a single space
-// - Strip trailing whitespace
-// - Remove blank lines at top/bottom
-function normalise(text: string): string {
-  return text
-    .split('\n')
-    .map(l => l.trimStart())          // ignore indentation differences
-    .join('\n')
-    .trim();
-}
-
 // Find the best match of `search` inside `source`, tolerating indentation differences.
 // Returns the start/end char indices of the matched region, or null if no match.
 function findFuzzy(source: string, search: string): { start: number; end: number } | null {
-  const normSearch = normalise(search);
   const sourceLines = source.split('\n');
 
   const searchLines = search.split('\n')
