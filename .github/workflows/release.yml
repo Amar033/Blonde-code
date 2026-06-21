@@ -22,7 +22,7 @@ jobs:
             os:     ubuntu-24.04-arm
           - target: bun-darwin-x64
             asset:  blonde-darwin-x64
-            os:     macos-13
+            os:     macos-latest
           - target: bun-darwin-arm64
             asset:  blonde-darwin-arm64
             os:     macos-latest
@@ -39,6 +39,12 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      # darwin-x64 is cross-compiled from the ARM64 runner.
+      # bun install only pulls the arm64 native, so we force-install the x64 one.
+      - name: Install darwin-x64 native package (cross-arch only)
+        if: matrix.target == 'bun-darwin-x64'
+        run: npm install --ignore-scripts @opentui/core-darwin-x64
 
       - name: Inject version into src/version.ts
         shell: bash
