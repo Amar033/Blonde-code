@@ -7,8 +7,8 @@ on:
 
 jobs:
   build:
-    name: Build ${{ matrix.target }}
-    runs-on: ubuntu-latest
+    name: Build ${{ matrix.asset }}
+    runs-on: ${{ matrix.os }}
 
     strategy:
       fail-fast: false
@@ -16,14 +16,19 @@ jobs:
         include:
           - target: bun-linux-x64
             asset:  blonde-linux-x64
+            os:     ubuntu-latest
           - target: bun-linux-arm64
             asset:  blonde-linux-arm64
+            os:     ubuntu-24.04-arm
           - target: bun-darwin-x64
             asset:  blonde-darwin-x64
+            os:     macos-13
           - target: bun-darwin-arm64
             asset:  blonde-darwin-arm64
+            os:     macos-latest
           - target: bun-windows-x64
             asset:  blonde-windows-x64.exe
+            os:     windows-latest
 
     steps:
       - uses: actions/checkout@v4
@@ -36,12 +41,16 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Inject version into src/version.ts
+        shell: bash
         run: |
-          VERSION="${{ github.ref_name }}"
-          VERSION_CLEAN="${VERSION#v}"   # strip leading "v"
-          sed -i "s/export const VERSION = '.*';/export const VERSION = '${VERSION_CLEAN}';/" src/version.ts
+          TAG="${{ github.ref_name }}"
+          VERSION_CLEAN="${TAG#v}"
+          # -i.bak is portable: macOS needs the suffix, Linux/Windows are fine with it
+          sed -i.bak "s/export const VERSION = '.*';/export const VERSION = '${VERSION_CLEAN}';/" src/version.ts
+          rm -f src/version.ts.bak
 
       - name: Build ${{ matrix.asset }}
+        shell: bash
         run: |
           bun build --compile \
             --target=${{ matrix.target }} \
