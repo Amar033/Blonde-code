@@ -1,4 +1,5 @@
 import { BaseTool, ToolResult, FakeRunResult } from './base.js';
+import type { ToolConfig } from './base.js';
 
 export class WebSearchTool extends BaseTool {
   name = 'web_search';
@@ -28,6 +29,8 @@ export class WebSearchTool extends BaseTool {
 
   isDangerous = false;
   requiresApproval = false;
+
+  constructor(config: ToolConfig) { super(config); }
 
   async fakeRun(args: unknown): Promise<FakeRunResult> {
     const { query } = args as { query: string };

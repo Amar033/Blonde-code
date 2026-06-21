@@ -1,4 +1,5 @@
 import type {Tool} from './base.js';
+import type {ToolConfig} from './base.js';
 import {ReadFileTool} from './file-read.js';
 import {ListFilesTool} from './list-files.js';
 import {WriteFileTool} from './file-write.js';
@@ -20,29 +21,30 @@ import {ReplaceBlockTool} from './replace-block.js';
 export class ToolRegistry {
   private tools = new Map<string, Tool>();
 
-  constructor(){
+  constructor(workspacePath: string){
+    const cfg: ToolConfig = { workspacePath };
     // register available tools
-    this.register(new ReadFileTool());
-    this.register(new ListFilesTool());
-    this.register(new WriteFileTool());
-    this.register(new EditFileTool());
-    this.register(new BashTool());
-    this.register(new GrepTool());
-    this.register(new GlobTool());
-    this.register(new WebFetchTool());
-    this.register(new WebSearchTool());
-    this.register(new GitStatusTool());
-    this.register(new GitDiffTool());
-    this.register(new GitLogTool());
-    this.register(new GitAddTool());
-    this.register(new GitCommitTool());
-    this.register(new GitBranchTool());
-    this.register(new GitStashTool());
-    this.register(new FileTreeTool());
-    this.register(new SearchCodebaseTool());
-    this.register(new DeleteFileTool());
-    this.register(new RenameFileTool());
-    this.register(new ReplaceBlockTool());
+    this.register(new ReadFileTool(cfg));
+    this.register(new ListFilesTool(cfg));
+    this.register(new WriteFileTool(cfg));
+    this.register(new EditFileTool(cfg));
+    this.register(new BashTool(cfg));
+    this.register(new GrepTool(cfg));
+    this.register(new GlobTool(cfg));
+    this.register(new WebFetchTool(cfg));
+    this.register(new WebSearchTool(cfg));
+    this.register(new GitStatusTool(cfg));
+    this.register(new GitDiffTool(cfg));
+    this.register(new GitLogTool(cfg));
+    this.register(new GitAddTool(cfg));
+    this.register(new GitCommitTool(cfg));
+    this.register(new GitBranchTool(cfg));
+    this.register(new GitStashTool(cfg));
+    this.register(new FileTreeTool(cfg));
+    this.register(new SearchCodebaseTool(cfg));
+    this.register(new DeleteFileTool(cfg));
+    this.register(new RenameFileTool(cfg));
+    this.register(new ReplaceBlockTool(cfg));
   }
 
   register (tool: Tool): void {

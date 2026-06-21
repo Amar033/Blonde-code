@@ -4,12 +4,22 @@
   "description": "Hand-built AI coding agent runtime",
   "main": "dist/main.js",
   "type": "module",
+  "bin": {
+    "blonde": "src/ui/run.tsx"
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/main.ts",
     "start": "node dist/main.js",
     "tui": "tsx src/ui/run-tui.tsx",
-    "agent": "bun src/ui/run.tsx"
+    "agent": "bun src/ui/run.tsx",
+    "compile": "bun build --compile --target=bun-linux-x64 --outfile=blonde-linux-x64 src/ui/run.tsx",
+    "compile:linux-x64":   "bun build --compile --target=bun-linux-x64   --outfile=dist/blonde-linux-x64   src/ui/run.tsx",
+    "compile:linux-arm64": "bun build --compile --target=bun-linux-arm64  --outfile=dist/blonde-linux-arm64  src/ui/run.tsx",
+    "compile:darwin-x64":  "bun build --compile --target=bun-darwin-x64  --outfile=dist/blonde-darwin-x64  src/ui/run.tsx",
+    "compile:darwin-arm64":"bun build --compile --target=bun-darwin-arm64 --outfile=dist/blonde-darwin-arm64 src/ui/run.tsx",
+    "compile:windows":     "bun build --compile --target=bun-windows-x64  --outfile=dist/blonde-windows-x64.exe src/ui/run.tsx",
+    "compile:all": "mkdir -p dist && npm run compile:linux-x64 && npm run compile:linux-arm64 && npm run compile:darwin-x64 && npm run compile:darwin-arm64 && npm run compile:windows"
   },
   "keywords": [
     "agent",

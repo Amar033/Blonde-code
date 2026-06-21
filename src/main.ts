@@ -17,7 +17,7 @@ async function main() {
   initializeAgentRegistry();
   
   // ToolRegistry constructor already registers all built-in tools
-  const toolRegistry = new ToolRegistry();
+  const toolRegistry = new ToolRegistry(process.cwd());
   
   const runtime = new AgentRuntime(toolRegistry, {
     maxTurns: 10,

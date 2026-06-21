@@ -166,12 +166,13 @@ interface UnifiedSessionProps {
   initialTask?:    string;
   resumeSession?:  Session;
   mockMode?:       boolean;
+  workspacePath:   string;
   onComplete?:     () => void;
   onShowSessions?: () => void;
 }
 
 export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
-  initialTask, resumeSession, mockMode, onComplete, onShowSessions
+  initialTask, resumeSession, mockMode, workspacePath, onComplete, onShowSessions
 }) => {
   const { width: termCols, height: termRows } = useTerminalDimensions();
   const renderer = useRenderer();
@@ -347,8 +348,8 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
     if (runtimeRef.current) return runtimeRef.current;
     if (!initPromiseRef.current) {
       initPromiseRef.current = (async () => {
-        const reg = new ToolRegistry();
-        const rt  = new AgentRuntime(reg, { maxTurns: 30, maxLoopCount: 20, debug: false });
+        const reg = new ToolRegistry(workspacePath);
+        const rt  = new AgentRuntime(reg, { maxTurns: 30, maxLoopCount: 20, debug: false, workspacePath });
         rt.setApprovalCallback(makeApprovalCallback());
         await rt.initialize();
         runtimeRef.current = rt;

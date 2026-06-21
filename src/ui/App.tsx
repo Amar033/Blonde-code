@@ -11,9 +11,10 @@ type Screen = 'startup' | 'welcome' | 'session' | 'sessions-list' | 'settings';
 
 interface AppProps {
   mockMode?: boolean;
+  workspacePath: string;
 }
 
-export const App: React.FC<AppProps> = ({ mockMode }) => {
+export const App: React.FC<AppProps> = ({ mockMode, workspacePath }) => {
   const [screen,        setScreen]        = useState<Screen>(mockMode ? 'session' : 'startup');
   const [initialTask,   setInitialTask]   = useState<string | undefined>(
     mockMode ? 'Build a FastAPI backend with SQLite database' : undefined
@@ -64,6 +65,7 @@ export const App: React.FC<AppProps> = ({ mockMode }) => {
           initialTask={initialTask}
           resumeSession={resumeSession}
           mockMode={mockMode}
+          workspacePath={workspacePath}
           onComplete={handleComplete}
           onShowSessions={() => setScreen('sessions-list')}
         />

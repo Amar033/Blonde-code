@@ -2,9 +2,9 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { existsSync } from 'fs';
 import { BaseTool, ToolResult, FakeRunResult } from './base.js';
+import type { ToolConfig } from './base.js';
 
 const execAsync = promisify(exec);
-const CWD = process.cwd();
 
 export class GitStatusTool extends BaseTool {
   name = 'git_status';
@@ -19,13 +19,15 @@ export class GitStatusTool extends BaseTool {
   isDangerous = false;
   requiresApproval = false;
 
+  constructor(config: ToolConfig) { super(config); }
+
   async fakeRun(): Promise<FakeRunResult> {
     return { wouldSucceed: true, description: 'Would run: git status --short --branch' };
   }
 
   async execute(): Promise<ToolResult> {
     try {
-      const { stdout } = await execAsync('git status --short --branch', { cwd: CWD });
+      const { stdout } = await execAsync('git status --short --branch', { cwd: this.config.workspacePath });
       const lines = stdout.trim().split('\n');
       const branch = lines[0]?.replace('## ', '') ?? 'unknown';
       const changes = lines.slice(1).filter(Boolean);
@@ -62,6 +64,8 @@ export class GitLogTool extends BaseTool {
   isDangerous = false;
   requiresApproval = false;
 
+  constructor(config: ToolConfig) { super(config); }
+
   async fakeRun(): Promise<FakeRunResult> {
     return { wouldSucceed: true, description: 'Would run: git log --oneline' };
   }
@@ -73,7 +77,7 @@ export class GitLogTool extends BaseTool {
       const tail = file ? ` -- "${file}"` : '';
       const { stdout } = await execAsync(
         `git log --oneline --no-decorate -n ${n}${tail}`,
-        { cwd: CWD }
+        { cwd: this.config.workspacePath }
       );
       const commits = stdout.trim().split('\n').filter(Boolean).map(line => {
         const [hash, ...rest] = line.split(' ');
@@ -104,6 +108,8 @@ export class GitAddTool extends BaseTool {
   isDangerous = false;
   requiresApproval = false;
 
+  constructor(config: ToolConfig) { super(config); }
+
   async fakeRun(args: unknown): Promise<FakeRunResult> {
     const { paths } = args as { paths: string };
     return { wouldSucceed: !!paths, description: `Would run: git add ${paths}` };
@@ -112,8 +118,8 @@ export class GitAddTool extends BaseTool {
   async execute(args: unknown): Promise<ToolResult> {
     const { paths } = args as { paths: string };
     try {
-      await execAsync(`git add ${paths}`, { cwd: CWD });
-      const { stdout } = await execAsync('git status --short', { cwd: CWD });
+      await execAsync(`git add ${paths}`, { cwd: this.config.workspacePath });
+      const { stdout } = await execAsync('git status --short', { cwd: this.config.workspacePath });
       const staged = stdout.split('\n').filter(l => l.match(/^[MADRC]/)).map(l => l.trim());
       return {
         success: true,
@@ -143,6 +149,8 @@ export class GitCommitTool extends BaseTool {
   isDangerous = false;
   requiresApproval = true;
 
+  constructor(config: ToolConfig) { super(config); }
+
   async fakeRun(args: unknown): Promise<FakeRunResult> {
     const { message } = args as { message: string };
     if (!message?.trim()) return { wouldSucceed: false, description: 'Empty commit message', warnings: ['message required'] };
@@ -155,14 +163,14 @@ export class GitCommitTool extends BaseTool {
 
     try {
       // Check there is something staged
-      const { stdout: statusOut } = await execAsync('git status --short', { cwd: CWD });
+      const { stdout: statusOut } = await execAsync('git status --short', { cwd: this.config.workspacePath });
       const staged = statusOut.split('\n').filter(l => l.match(/^[MADRC]/));
       if (staged.length === 0) {
         return { success: false, output: null, error: 'Nothing staged to commit. Run git_add first.' };
       }
 
       const safeMsg = message.replace(/"/g, '\\"');
-      const { stdout } = await execAsync(`git commit -m "${safeMsg}"`, { cwd: CWD });
+      const { stdout } = await execAsync(`git commit -m "${safeMsg}"`, { cwd: this.config.workspacePath });
       const hashMatch  = stdout.match(/\[[\w/]+ ([a-f0-9]+)\]/);
       return {
         success: true,
@@ -197,6 +205,8 @@ export class GitBranchTool extends BaseTool {
   isDangerous = false;
   requiresApproval = false;
 
+  constructor(config: ToolConfig) { super(config); }
+
   async fakeRun(args: unknown): Promise<FakeRunResult> {
     const { action, name } = args as { action: string; name?: string };
     return { wouldSucceed: true, description: `Would ${action} branch${name ? ': ' + name : ''}` };
@@ -207,7 +217,7 @@ export class GitBranchTool extends BaseTool {
 
     try {
       if (action === 'list') {
-        const { stdout } = await execAsync('git branch -a', { cwd: CWD });
+        const { stdout } = await execAsync('git branch -a', { cwd: this.config.workspacePath });
         const branches = stdout.trim().split('\n').map(b => b.trim()).filter(Boolean);
         const current  = branches.find(b => b.startsWith('*'))?.replace('* ', '') ?? '';
         return { success: true, output: { branches: branches.map(b => b.replace('* ', '')), current } };
@@ -216,12 +226,12 @@ export class GitBranchTool extends BaseTool {
       if (!name?.trim()) return { success: false, output: null, error: `Branch name required for action: ${action}` };
 
       if (action === 'create') {
-        await execAsync(`git checkout -b "${name}"`, { cwd: CWD });
+        await execAsync(`git checkout -b "${name}"`, { cwd: this.config.workspacePath });
         return { success: true, output: { action, name, message: `Created and switched to branch: ${name}` } };
       }
 
       if (action === 'switch') {
-        await execAsync(`git checkout "${name}"`, { cwd: CWD });
+        await execAsync(`git checkout "${name}"`, { cwd: this.config.workspacePath });
         return { success: true, output: { action, name, message: `Switched to branch: ${name}` } };
       }
 
@@ -255,6 +265,8 @@ export class GitStashTool extends BaseTool {
   isDangerous = false;
   requiresApproval = false;
 
+  constructor(config: ToolConfig) { super(config); }
+
   async fakeRun(args: unknown): Promise<FakeRunResult> {
     const { action } = args as { action: string };
     return { wouldSucceed: true, description: `Would git stash ${action}` };
@@ -264,17 +276,17 @@ export class GitStashTool extends BaseTool {
     const { action, message } = args as { action: 'push' | 'pop' | 'list'; message?: string };
     try {
       if (action === 'list') {
-        const { stdout } = await execAsync('git stash list', { cwd: CWD });
+        const { stdout } = await execAsync('git stash list', { cwd: this.config.workspacePath });
         const stashes = stdout.trim().split('\n').filter(Boolean);
         return { success: true, output: { stashes, count: stashes.length } };
       }
       if (action === 'push') {
         const label = message ? ` -m "${message.replace(/"/g, '\\"')}"` : '';
-        const { stdout } = await execAsync(`git stash push${label}`, { cwd: CWD });
+        const { stdout } = await execAsync(`git stash push${label}`, { cwd: this.config.workspacePath });
         return { success: true, output: { action, message: stdout.trim() } };
       }
       if (action === 'pop') {
-        const { stdout } = await execAsync('git stash pop', { cwd: CWD });
+        const { stdout } = await execAsync('git stash pop', { cwd: this.config.workspacePath });
         return { success: true, output: { action, message: stdout.trim() } };
       }
       return { success: false, output: null, error: `Unknown action: ${action}` };
@@ -302,6 +314,8 @@ export class GitDiffTool extends BaseTool {
   isDangerous = false;
   requiresApproval = false;
 
+  constructor(config: ToolConfig) { super(config); }
+
   async fakeRun(): Promise<FakeRunResult> {
     return { wouldSucceed: true, description: 'Would run: git diff' };
   }
@@ -310,7 +324,7 @@ export class GitDiffTool extends BaseTool {
     const { path } = (args ?? {}) as { path?: string };
     try {
       const cmd = path ? `git diff -- "${path}"` : 'git diff';
-      const { stdout } = await execAsync(cmd, { cwd: CWD });
+      const { stdout } = await execAsync(cmd, { cwd: this.config.workspacePath });
       const diff = stdout.trim();
       const additions = (diff.match(/^\+[^+]/gm) ?? []).length;
       const deletions  = (diff.match(/^-[^-]/gm) ?? []).length;

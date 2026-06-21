@@ -22,7 +22,8 @@ export interface RuntimeConfig{
   maxLoopCount: number;
   maxConsecutiveErrors: number;
   debug: boolean;
-  agent?: string; // Agent to use for this runtime
+  agent?: string;
+  workspacePath?: string;
 }
 
 // agent runtime, the core event loop
@@ -218,7 +219,7 @@ export class AgentRuntime {
     }).catch(() => { /* keep default 8000 */ });
 
     // Build repo map in background — inject into LLMClient once ready
-    const root = process.cwd();
+    const root = this.config.workspacePath ?? process.cwd();
     repoMapService.build(root).then(() => {
       this.llmClient?.setRepoMap(repoMapService.getFormatted());
     }).catch(() => { /* non-fatal */ });
@@ -747,7 +748,7 @@ export class AgentRuntime {
             if (toolCall.name === 'write_file' || toolCall.name === 'edit_file') {
               const p = toolCall.args.path as string | undefined;
               if (p && observation?.success) {
-                const root = process.cwd();
+                const root = this.config.workspacePath ?? process.cwd();
                 repoMapService.invalidate(p, root).then(() => {
                   this.llmClient?.setRepoMap(repoMapService.getFormatted());
                 }).catch(() => {});
@@ -801,7 +802,7 @@ export class AgentRuntime {
 
     try {
       await execAsync('npx tsc --noEmit 2>&1', {
-        cwd: process.cwd(),
+        cwd: this.config.workspacePath ?? process.cwd(),
         timeout: 20_000,
       });
       return null; // clean

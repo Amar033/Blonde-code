@@ -1,4 +1,5 @@
 import { BaseTool, ToolResult, FakeRunResult } from './base.js';
+import type { ToolConfig } from './base.js';
 
 export class WebFetchTool extends BaseTool {
   name = 'web_fetch';
@@ -28,6 +29,8 @@ export class WebFetchTool extends BaseTool {
 
   isDangerous = false;
   requiresApproval = false;
+
+  constructor(config: ToolConfig) { super(config); }
 
   private maxResponseSize = 5 * 1024 * 1024; // 5MB
 

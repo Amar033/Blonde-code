@@ -5,6 +5,7 @@ import { loadUiConfig } from '../../services/ui-config.js';
 import { brandArtFor, getUsername, pickGreeting } from '../brand.js';
 import { theme } from '../theme.js';
 import { FlowerBackground } from '../components/FlowerBackground.js';
+import { checkForUpdate } from '../../services/updater.js';
 
 async function fetchAiGreeting(name: string): Promise<string> {
   try {
@@ -83,8 +84,11 @@ export const StartupScreen: React.FC<StartupScreenProps> = ({ onDone }) => {
     const addLog = (text: string, level: LogLine['level'] = 'info') =>
       setLogs(prev => [...prev, { text, level }]);
 
+    // Run search init and update check in parallel
+    const updateCheck = checkForUpdate();
+
     ensureSearXNG(addLog)
-      .then(result => {
+      .then(async result => {
         if (!result.ok) {
           setLogs(prev => {
             const last = prev[prev.length - 1];
@@ -94,11 +98,19 @@ export const StartupScreen: React.FC<StartupScreenProps> = ({ onDone }) => {
             return prev;
           });
         }
+        const update = await updateCheck;
+        if (update) {
+          addLog(`Update available: ${update.version}  →  run 'blonde --update'`, 'warn');
+        }
         setDone(true);
         setTimeout(onDone, 600);
       })
-      .catch(() => {
+      .catch(async () => {
         addLog('Search init failed — using DuckDuckGo', 'warn');
+        const update = await updateCheck;
+        if (update) {
+          addLog(`Update available: ${update.version}  →  run 'blonde --update'`, 'warn');
+        }
         setDone(true);
         setTimeout(onDone, 600);
       });

@@ -1,6 +1,7 @@
 import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
 import { BaseTool, ToolResult, FakeRunResult } from './base.js';
+import type { ToolConfig } from './base.js';
 
 const execAsync = promisify(exec);
 
@@ -38,7 +39,9 @@ export class BashTool extends BaseTool {
   isDangerous = true;
   requiresApproval = true;
 
-  private config: BashConfig = {
+  constructor(config: ToolConfig) { super(config); }
+
+  private bashConfig: BashConfig = {
     allowedCommands: [
       // Package managers
       'npm', 'npx', 'yarn', 'pnpm', 'bun',
@@ -81,7 +84,7 @@ export class BashTool extends BaseTool {
     const lowerCommand = command.toLowerCase().trim();
     
     // Check denylist first (takes priority)
-    for (const denied of this.config.deniedCommands) {
+    for (const denied of this.bashConfig.deniedCommands) {
       if (lowerCommand.includes(denied.toLowerCase())) {
         return { allowed: false, reason: `Command matches denied pattern: ${denied}` };
       }
@@ -89,7 +92,7 @@ export class BashTool extends BaseTool {
 
     // Check allowlist
     const baseCommand = lowerCommand.split(' ')[0];
-    const isAllowed = this.config.allowedCommands.some(allowed => 
+    const isAllowed = this.bashConfig.allowedCommands.some(allowed => 
       lowerCommand.startsWith(allowed.toLowerCase()) || 
       baseCommand === allowed.toLowerCase()
     );
@@ -129,7 +132,7 @@ export class BashTool extends BaseTool {
       cwd?: string;
     };
 
-    const timeoutMs = (timeout || this.config.timeout) * 1000;
+    const timeoutMs = (timeout || this.bashConfig.timeout) * 1000;
 
     // Security check
     const securityCheck = this.isCommandAllowed(command);
@@ -142,7 +145,7 @@ export class BashTool extends BaseTool {
     }
 
     try {
-      const workingDir = cwd || this.config.workingDirectory || process.cwd();
+      const workingDir = cwd || this.bashConfig.workingDirectory || this.config.workspacePath;
       
       const { stdout, stderr } = await execAsync(command, {
         cwd: workingDir,
@@ -175,7 +178,7 @@ export class BashTool extends BaseTool {
         return {
           success: false,
           output: null,
-          error: `Command timed out after ${timeout || this.config.timeout} seconds`,
+          error: `Command timed out after ${timeout || this.bashConfig.timeout} seconds`,
         };
       }
 

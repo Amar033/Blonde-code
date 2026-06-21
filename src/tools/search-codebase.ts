@@ -1,4 +1,5 @@
 import { BaseTool, ToolResult, FakeRunResult } from './base.js';
+import type { ToolConfig } from './base.js';
 import { repoMapService } from '../services/repo-map.js';
 
 export class SearchCodebaseTool extends BaseTool {
@@ -18,6 +19,8 @@ export class SearchCodebaseTool extends BaseTool {
 
   isDangerous = false;
   requiresApproval = false;
+
+  constructor(config: ToolConfig) { super(config); }
 
   async fakeRun(args: unknown): Promise<FakeRunResult> {
     const { query } = args as { query: string };

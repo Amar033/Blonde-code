@@ -1,8 +1,7 @@
 import { readFileSync, writeFileSync } from 'fs';
 import { resolve } from 'path';
 import { BaseTool, ToolResult, FakeRunResult } from './base.js';
-
-const CWD = process.cwd();
+import type { ToolConfig } from './base.js';
 
 const BLOCKED = ['node_modules', '.git', 'dist', 'build'];
 function isBlocked(p: string): boolean {
@@ -73,6 +72,8 @@ export class ReplaceBlockTool extends BaseTool {
   isDangerous = false;
   requiresApproval = false;
 
+  constructor(config: ToolConfig) { super(config); }
+
   async fakeRun(args: unknown): Promise<FakeRunResult> {
     const { path, search } = args as { path: string; search: string };
     if (!path || !search) return { wouldSucceed: false, description: 'path and search required', warnings: [] };
@@ -87,7 +88,7 @@ export class ReplaceBlockTool extends BaseTool {
     if (replace === undefined || replace === null) return { success: false, output: null, error: 'replace is required (use empty string to delete)' };
     if (isBlocked(path)) return { success: false, output: null, error: `Cannot edit protected path: ${path}` };
 
-    const full = resolve(CWD, path);
+    const full = resolve(this.config.workspacePath, path);
     let source: string;
     try {
       source = readFileSync(full, 'utf8');
