@@ -1,7 +1,9 @@
 import { promises as fs} from 'fs';
+import { resolve } from 'path';
 import { BaseTool, ToolResult, FakeRunResult} from './base.js';
+import type { ToolConfig } from './base.js';
 
-// Read file Tool - 
+// Read file Tool -
 export class ReadFileTool extends BaseTool{
   name = 'read_file';
   description = 'Read contents of a file';
@@ -16,13 +18,16 @@ export class ReadFileTool extends BaseTool{
     required: ['path'],
   };
 
-  isDangerous = false; 
+  isDangerous = false;
   requiresApproval = false;
+
+  constructor(config: ToolConfig) { super(config); }
 
   async fakeRun(args: unknown): Promise<FakeRunResult>{
     const {path} = args as {path: string};
+    const resolved = resolve(this.config.workspacePath, path);
     try {
-      await fs.access(path);
+      await fs.access(resolved);
       return {
         wouldSucceed: true,
         description: `Would read file ${path}`,
@@ -44,8 +49,9 @@ export class ReadFileTool extends BaseTool{
   async execute(args: unknown): Promise<ToolResult> {
     const startTime = Date.now();
     const {path, startLine, endLine} = args as {path: string; startLine?: number; endLine?: number; maxBytes?: number;};
-    //path validation
-    if (this.isBlockedPath(path)){
+    const resolved = resolve(this.config.workspacePath, path);
+
+    if (this.isBlockedPath(resolved)){
       return {
         success: false,
         output: null,
@@ -54,7 +60,7 @@ export class ReadFileTool extends BaseTool{
     }
 
     try{
-      const content = await fs.readFile(path,'utf-8');
+      const content = await fs.readFile(resolved,'utf-8');
       const lines = content.split('\n');
 
       const start = (startLine || 1) -1;

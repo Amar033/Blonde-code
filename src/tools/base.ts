@@ -1,8 +1,11 @@
 // base tools interface
 // All tools implements this
 //  Principles we need to follow:
-//  - Validation - Safety Flags - Observable results 
+//  - Validation - Safety Flags - Observable results
 
+export interface ToolConfig {
+  workspacePath: string;
+}
 
 // Tool Execution result
 export interface ToolResult{
@@ -50,6 +53,12 @@ export abstract class BaseTool implements Tool{
   abstract argsSchema: Tool['argsSchema'];
   abstract isDangerous: boolean;
   abstract requiresApproval: boolean;
+
+  protected config: ToolConfig;
+
+  constructor(config: ToolConfig) {
+    this.config = config;
+  }
 
   abstract execute(args: unknown): Promise<ToolResult>;
   abstract fakeRun(args: unknown): Promise<FakeRunResult>;

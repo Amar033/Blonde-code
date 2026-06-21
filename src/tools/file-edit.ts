@@ -1,5 +1,7 @@
 import { promises as fs } from 'fs';
+import { resolve } from 'path';
 import { BaseTool, ToolResult, FakeRunResult } from './base.js';
+import type { ToolConfig } from './base.js';
 
 export class EditFileTool extends BaseTool {
   name = 'edit_file';
@@ -26,6 +28,8 @@ export class EditFileTool extends BaseTool {
 
   isDangerous = true;
   requiresApproval = true;
+
+  constructor(config: ToolConfig) { super(config); }
 
   validate(args: unknown): import('./base.js').ValidationResult {
     const base = super.validate(args);
@@ -57,8 +61,9 @@ export class EditFileTool extends BaseTool {
 
   async fakeRun(args: unknown): Promise<FakeRunResult> {
     const { path, find } = args as { path: string; find: string; replace: string };
+    const resolved = resolve(this.config.workspacePath, path);
 
-    if (this.isBlockedPath(path)) {
+    if (this.isBlockedPath(resolved)) {
       return {
         wouldSucceed: false,
         description: `Cannot edit blocked path: ${path}`,
@@ -67,7 +72,7 @@ export class EditFileTool extends BaseTool {
     }
 
     try {
-      const content = await fs.readFile(path, 'utf-8');
+      const content = await fs.readFile(resolved, 'utf-8');
       const matches = this.countMatches(content, find);
       
       if (matches === 0) {
@@ -111,8 +116,9 @@ export class EditFileTool extends BaseTool {
   async execute(args: unknown): Promise<ToolResult> {
     const startTime = Date.now();
     const { path, find, replace } = args as { path: string; find: string; replace: string };
+    const resolved = resolve(this.config.workspacePath, path);
 
-    if (this.isBlockedPath(path)) {
+    if (this.isBlockedPath(resolved)) {
       return {
         success: false,
         output: null,
@@ -129,7 +135,7 @@ export class EditFileTool extends BaseTool {
     }
 
     try {
-      const content = await fs.readFile(path, 'utf-8');
+      const content = await fs.readFile(resolved, 'utf-8');
       
       const matchCount = this.countMatches(content, find);
       
@@ -151,8 +157,8 @@ export class EditFileTool extends BaseTool {
 
       // Use a function replacer so $-sequences in `replace` are treated as literals
       const newContent = content.replace(find, () => replace);
-      
-      await fs.writeFile(path, newContent, 'utf-8');
+
+      await fs.writeFile(resolved, newContent, 'utf-8');
       
       const duration = Date.now() - startTime;
 

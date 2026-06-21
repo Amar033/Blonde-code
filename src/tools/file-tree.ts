@@ -1,6 +1,7 @@
 import { promises as fs } from 'fs';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { BaseTool, ToolResult, FakeRunResult } from './base.js';
+import type { ToolConfig } from './base.js';
 
 const SKIP = new Set(['node_modules', 'dist', 'build', '.git', '__pycache__', '.cache', 'coverage']);
 
@@ -27,6 +28,8 @@ export class FileTreeTool extends BaseTool {
 
   isDangerous = false;
   requiresApproval = false;
+
+  constructor(config: ToolConfig) { super(config); }
 
   async fakeRun(args: unknown): Promise<FakeRunResult> {
     const { path = '.' } = (args ?? {}) as { path?: string };
@@ -90,9 +93,10 @@ export class FileTreeTool extends BaseTool {
 
   async execute(args: unknown): Promise<ToolResult> {
     const { path = '.', depth = 4 } = (args ?? {}) as { path?: string; depth?: number };
+    const resolved = resolve(this.config.workspacePath, path);
 
     try {
-      const { lines, fileCount, dirCount } = await this.walk(path, 0, depth, '');
+      const { lines, fileCount, dirCount } = await this.walk(resolved, 0, depth, '');
       const tree = [path + '/', ...lines].join('\n');
 
       return {

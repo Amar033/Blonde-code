@@ -1,5 +1,7 @@
 import { promises as fs } from 'fs';
+import { resolve } from 'path';
 import { BaseTool, ToolResult, FakeRunResult } from './base.js';
+import type { ToolConfig } from './base.js';
 
 export class GrepTool extends BaseTool {
   name = 'grep';
@@ -46,6 +48,8 @@ export class GrepTool extends BaseTool {
 
   isDangerous = false;
   requiresApproval = false;
+
+  constructor(config: ToolConfig) { super(config); }
 
   private defaultExclude = [
     'node_modules',
@@ -98,7 +102,6 @@ export class GrepTool extends BaseTool {
     const startTime = Date.now();
     const {
       pattern,
-      path = '.',
       include,
       exclude,
       caseSensitive = false,
@@ -113,6 +116,8 @@ export class GrepTool extends BaseTool {
       context?: number;
       maxResults?: number;
     };
+    const rawPath = (args as { path?: string }).path ?? '.';
+    const path = resolve(this.config.workspacePath, rawPath);
 
     const excludePatterns = exclude ? exclude.split(',').map(s => s.trim()) : [];
 

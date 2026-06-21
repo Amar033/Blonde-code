@@ -26,6 +26,9 @@ function parseInline(line: string): Segment[] {
         i = end + 2;
         continue;
       }
+      // No closing ** on this line — skip the markers silently
+      i += 2;
+      continue;
     }
     // Inline code `...`
     if (line[i] === '`') {
@@ -46,6 +49,9 @@ function parseInline(line: string): Segment[] {
         i = end + 1;
         continue;
       }
+      // No closing * — skip the marker silently
+      i++;
+      continue;
     }
     buf += line[i];
     i++;
@@ -57,12 +63,12 @@ function parseInline(line: string): Segment[] {
 export const InlineMd: React.FC<{ text: string }> = ({ text }) => {
   const segs = parseInline(text);
   return (
-    <Text>
+    <Text wrap="wrap">
       {segs.map((s, i) =>
-        s.bold ? <Text key={i} bold>{s.text}</Text>
-        : s.code ? <Text key={i} color={theme.syntax.string}>{s.text}</Text>
-        : s.dim  ? <Text key={i} dimColor>{s.text}</Text>
-        : <Text key={i}>{s.text}</Text>
+        s.bold ? <Text key={i} bold wrap="wrap">{s.text}</Text>
+        : s.code ? <Text key={i} color={theme.syntax.string} wrap="wrap">{s.text}</Text>
+        : s.dim  ? <Text key={i} dimColor wrap="wrap">{s.text}</Text>
+        : <Text key={i} wrap="wrap">{s.text}</Text>
       )}
     </Text>
   );
@@ -135,13 +141,17 @@ export const MarkdownBlock: React.FC<{ text: string }> = ({ text }) => {
   const blocks = parseBlocks(text);
 
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" flexShrink={0}>
       {blocks.map((block, bi) => {
         if (block.type === 'heading') {
-          const c = bi === 0 ? theme.text.primary : theme.role.assistant;
+          const headingColor =
+            block.level === 1 ? theme.text.primary
+            : block.level === 2 ? theme.role.assistant
+            : theme.text.secondary;
+          const prefix = block.level === 1 ? '' : block.level === 2 ? '  ' : '    ';
           return (
             <Box key={bi} marginTop={bi > 0 ? 1 : 0}>
-              <Text bold color={c}>{block.text}</Text>
+              <Text bold color={headingColor} wrap="wrap">{prefix}{block.text}</Text>
             </Box>
           );
         }
@@ -150,9 +160,11 @@ export const MarkdownBlock: React.FC<{ text: string }> = ({ text }) => {
           return (
             <Box key={bi} flexDirection="column" marginTop={1} paddingX={1}
               borderStyle="single" borderColor={theme.border.dim}>
-              {block.lang ? <Text color={theme.text.dim}>{block.lang}</Text> : null}
+              {block.lang
+                ? <Text color={theme.text.dim} dimColor>{block.lang}</Text>
+                : null}
               {block.lines.map((l, li) => (
-                <Text key={li} color={theme.syntax.string}>{l}</Text>
+                <Text key={li} color={theme.syntax.string} wrap="wrap">{l}</Text>
               ))}
             </Box>
           );
@@ -162,21 +174,21 @@ export const MarkdownBlock: React.FC<{ text: string }> = ({ text }) => {
           return (
             <Box key={bi} flexDirection="column" marginTop={bi > 0 ? 1 : 0}>
               {block.items.map((item, ii) => (
-                <Box key={ii} gap={1}>
-                  <Text color={theme.text.secondary}>•</Text>
-                  <InlineMd text={item} />
+                <Box key={ii} flexDirection="row" flexShrink={0}>
+                  <Text color={theme.text.secondary}>{'• '}</Text>
+                  <Box flexShrink={1} flexGrow={1}>
+                    <InlineMd text={item} />
+                  </Box>
                 </Box>
               ))}
             </Box>
           );
         }
 
-        // paragraph
+        // paragraph — join lines so inline markdown never splits across line breaks
         return (
-          <Box key={bi} flexDirection="column" marginTop={bi > 0 ? 1 : 0}>
-            {block.lines.filter(l => l.trim()).map((l, li) => (
-              <InlineMd key={li} text={l} />
-            ))}
+          <Box key={bi} marginTop={bi > 0 ? 1 : 0} flexShrink={0}>
+            <InlineMd text={block.lines.filter(l => l.trim()).join(' ')} />
           </Box>
         );
       })}

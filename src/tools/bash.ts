@@ -1,6 +1,7 @@
 import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
 import { BaseTool, ToolResult, FakeRunResult } from './base.js';
+import type { ToolConfig } from './base.js';
 
 const execAsync = promisify(exec);
 
@@ -38,7 +39,9 @@ export class BashTool extends BaseTool {
   isDangerous = true;
   requiresApproval = true;
 
-  private config: BashConfig = {
+  constructor(config: ToolConfig) { super(config); }
+
+  private bashConfig: BashConfig = {
     allowedCommands: [
       // Package managers
       'npm', 'npx', 'yarn', 'pnpm', 'bun',
@@ -77,28 +80,31 @@ export class BashTool extends BaseTool {
     timeout: 30,
   };
 
-  private isCommandAllowed(command: string): { allowed: boolean; reason?: string } {
+  // Hard denylist — these patterns are blocked regardless of user approval.
+  private isDenied(command: string): { denied: boolean; reason?: string } {
     const lowerCommand = command.toLowerCase().trim();
-    
-    // Check denylist first (takes priority)
-    for (const denied of this.config.deniedCommands) {
+    for (const denied of this.bashConfig.deniedCommands) {
       if (lowerCommand.includes(denied.toLowerCase())) {
-        return { allowed: false, reason: `Command matches denied pattern: ${denied}` };
+        return { denied: true, reason: `Command matches denied pattern: ${denied}` };
       }
     }
+    return { denied: false };
+  }
 
-    // Check allowlist
+  // Soft allowlist — used by fakeRun to decide whether to surface an approval prompt.
+  // execute() does NOT use this check; it relies on the requiresApproval gate instead.
+  private isCommandAllowed(command: string): { allowed: boolean; reason?: string } {
+    const denial = this.isDenied(command);
+    if (denial.denied) return { allowed: false, reason: denial.reason };
+
+    const lowerCommand = command.toLowerCase().trim();
     const baseCommand = lowerCommand.split(' ')[0];
-    const isAllowed = this.config.allowedCommands.some(allowed => 
-      lowerCommand.startsWith(allowed.toLowerCase()) || 
+    const isAllowed = this.bashConfig.allowedCommands.some(allowed =>
+      lowerCommand.startsWith(allowed.toLowerCase()) ||
       baseCommand === allowed.toLowerCase()
     );
 
-    if (isAllowed) {
-      return { allowed: true };
-    }
-
-    // Not in allowlist - require approval
+    if (isAllowed) return { allowed: true };
     return { allowed: false, reason: 'Command not in allowed list - requires approval' };
   }
 
@@ -129,20 +135,20 @@ export class BashTool extends BaseTool {
       cwd?: string;
     };
 
-    const timeoutMs = (timeout || this.config.timeout) * 1000;
+    const timeoutMs = (timeout || this.bashConfig.timeout) * 1000;
 
-    // Security check
-    const securityCheck = this.isCommandAllowed(command);
-    if (!securityCheck.allowed) {
+    // Hard denylist check — runs even after user approval.
+    const denial = this.isDenied(command);
+    if (denial.denied) {
       return {
         success: false,
         output: null,
-        error: securityCheck.reason || 'Command not allowed for security reasons',
+        error: denial.reason || 'Command blocked by security policy',
       };
     }
 
     try {
-      const workingDir = cwd || this.config.workingDirectory || process.cwd();
+      const workingDir = cwd || this.bashConfig.workingDirectory || this.config.workspacePath;
       
       const { stdout, stderr } = await execAsync(command, {
         cwd: workingDir,
@@ -175,7 +181,7 @@ export class BashTool extends BaseTool {
         return {
           success: false,
           output: null,
-          error: `Command timed out after ${timeout || this.config.timeout} seconds`,
+          error: `Command timed out after ${timeout || this.bashConfig.timeout} seconds`,
         };
       }
 

@@ -4,7 +4,9 @@ import type {Plan, Observation} from './agent.js'
 // Events represent things that happen to the agent 
 // Events cause state transitions
 
-export type AgentEvent = 
+export type SearchSource = { title: string; url: string };
+
+export type AgentEvent =
   | {type: 'user_input'; input: string}
   | {type: 'plan_generated'; plan: Plan}
   | {type: 'llm_response'; content: string; parsed: PlannerResponse; thinking?: string}
@@ -14,6 +16,7 @@ export type AgentEvent =
   | {type: 'tool_error'; toolName: string; error: string}
   | {type: 'tool_approval_needed'; toolCall: { name: string; args: Record<string, unknown>; reasoning?: string }}
   | {type: 'observation_ready'; observation: Observation}
+  | {type: 'sources_ready'; sources: SearchSource[]}
   | {type: 'user_approval'; approved: boolean}
   | {type: 'abort'; reason: string}
   | {type: 'complete'; finalResponse: string};

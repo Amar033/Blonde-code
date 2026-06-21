@@ -1,6 +1,7 @@
 import { promises as fs } from 'fs';
-import { basename, dirname, join } from 'path';
+import { basename, dirname, join, resolve } from 'path';
 import { BaseTool, ToolResult, FakeRunResult } from './base.js';
+import type { ToolConfig } from './base.js';
 
 export class GlobTool extends BaseTool {
   name = 'glob';
@@ -29,6 +30,8 @@ export class GlobTool extends BaseTool {
 
   isDangerous = false;
   requiresApproval = false;
+
+  constructor(config: ToolConfig) { super(config); }
 
   private defaultExclude = [
     'node_modules',
@@ -61,11 +64,13 @@ export class GlobTool extends BaseTool {
 
   async execute(args: unknown): Promise<ToolResult> {
     const startTime = Date.now();
-    const { pattern, path = '.', maxResults = 100 } = args as {
+    const { pattern, maxResults = 100 } = args as {
       pattern: string;
       path?: string;
       maxResults?: number;
     };
+    const rawPath = (args as { path?: string }).path ?? '.';
+    const path = resolve(this.config.workspacePath, rawPath);
 
     try {
       const results = await this.glob(pattern, path, maxResults);

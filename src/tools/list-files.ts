@@ -1,5 +1,7 @@
 import {promises as fs} from 'fs';
+import {resolve} from 'path';
 import {BaseTool, ToolResult, FakeRunResult} from './base.js';
+import type {ToolConfig} from './base.js';
 
 export class ListFilesTool extends BaseTool {
   name = 'list_files';
@@ -20,12 +22,15 @@ export class ListFilesTool extends BaseTool {
   isDangerous = false;
   requiresApproval = false;
 
+  constructor(config: ToolConfig) { super(config); }
+
   async fakeRun(args: unknown): Promise<FakeRunResult> {
     const {path = '.'} = args as {path?: string};
+    const resolved = resolve(this.config.workspacePath, path);
 
     try {
-      await fs.access(path);
-      const stats = await fs.stat(path);
+      await fs.access(resolved);
+      const stats = await fs.stat(resolved);
       if (!stats.isDirectory()) {
         return {
           wouldSucceed: false,
@@ -48,9 +53,10 @@ export class ListFilesTool extends BaseTool {
 
   async execute(args: unknown): Promise<ToolResult> {
     const {path = '.'} = args as {path?: string};
+    const resolved = resolve(this.config.workspacePath, path);
 
     try {
-      const entries = await fs.readdir(path, {withFileTypes: true});
+      const entries = await fs.readdir(resolved, {withFileTypes: true});
 
       // Filter out heavy/irrelevant directories; keep dot-files (.env, .gitignore, etc.)
       const filtered = entries.filter(e =>
