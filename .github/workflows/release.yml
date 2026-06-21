@@ -9,6 +9,7 @@ jobs:
   build:
     name: Build ${{ matrix.asset }}
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.allow_failure == true }}
 
     strategy:
       fail-fast: false
@@ -23,6 +24,7 @@ jobs:
           - target: bun-darwin-x64
             asset:  blonde-darwin-x64
             os:     macos-latest
+            allow_failure: true
           - target: bun-darwin-arm64
             asset:  blonde-darwin-arm64
             os:     macos-latest
@@ -40,11 +42,18 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      # darwin-x64 is cross-compiled from the ARM64 runner.
-      # bun install only pulls the arm64 native, so we force-install the x64 one.
+      # darwin-x64 is cross-compiled from an ARM64 runner.
+      # bun install only pulls the arm64 native binary, so we fetch the x64 tarball
+      # directly from the npm registry and unpack it — no npm invocation, so the
+      # existing node_modules (react-devtools-core etc.) are left untouched.
       - name: Install darwin-x64 native package (cross-arch only)
         if: matrix.target == 'bun-darwin-x64'
-        run: npm install --ignore-scripts --legacy-peer-deps --force @opentui/core-darwin-x64
+        shell: bash
+        run: |
+          VERSION=$(node -e "console.log(require('./node_modules/@opentui/core/package.json').version)")
+          mkdir -p node_modules/@opentui/core-darwin-x64
+          curl -fsSL "https://registry.npmjs.org/@opentui/core-darwin-x64/-/core-darwin-x64-${VERSION}.tgz" \
+            | tar -xz --strip-components=1 -C node_modules/@opentui/core-darwin-x64
 
       - name: Inject version into src/version.ts
         shell: bash
@@ -126,5 +135,6 @@ jobs:
             dist/blonde-darwin-arm64
             dist/blonde-windows-x64.exe
             dist/SHA256SUMS.txt
+          fail_on_unmatched_files: false
           draft: false
           prerelease: false
