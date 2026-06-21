@@ -11,7 +11,7 @@ const RULES: Rule[] = [
   // Git operations — checked first so "show diff" doesn't fall into file-read
   {
     pattern: /\b(git|diff|commit|push|pull|branch|merge|rebase|stash|log|status|staged|unstaged|changed files)\b/i,
-    tools: ['read_file', 'list_files', 'git_status', 'git_diff', 'bash'],
+    tools: ['read_file', 'list_files', 'git_status', 'git_diff', 'git_log', 'git_add', 'git_commit', 'git_branch', 'git_stash', 'bash'],
   },
   // Web research — explicit "online/web/url/http" required to avoid matching "search in files"
   {
@@ -33,10 +33,15 @@ const RULES: Rule[] = [
     pattern: /\b(list files?|ls|tree|directory|folder|structure|what files|show files?)\b/i,
     tools: ['list_files', 'file_tree', 'glob', 'read_file'],
   },
-  // File editing / creation
+  // File editing / creation / refactoring
   {
-    pattern: /\b(edit|modify|change|update|fix|add|remove|delete|replace|rename|rewrite|refactor|create|write|append|insert|patch)\b/i,
-    tools: ['read_file', 'write_file', 'edit_file', 'list_files', 'git_diff'],
+    pattern: /\b(edit|modify|change|update|fix|add|remove|replace|rewrite|create|write|append|insert|patch)\b/i,
+    tools: ['read_file', 'write_file', 'edit_file', 'replace_block', 'list_files', 'git_diff', 'search_codebase'],
+  },
+  // File delete / rename / move
+  {
+    pattern: /\b(delete|remove|rename|move|mv|refactor)\b/i,
+    tools: ['read_file', 'list_files', 'delete_file', 'rename_file', 'search_codebase', 'git_status'],
   },
   // File reading / display
   {
@@ -47,6 +52,20 @@ const RULES: Rule[] = [
 
 // Only filter when we'd remove at least this many tools — avoids negligible reductions
 const MIN_REDUCTION = 2;
+
+// Greetings, thanks, one-word acks, and simple social messages that need no tools.
+const CONVERSATIONAL_RE =
+  /^(hi+|hello+|hey+|hiya|howdy|sup|yo+|lol+|haha+|heh|wow+|nice|cool|(ok(ay)?)|k|sure|(thanks?(\s+you)?)|thx|ty|(you'?re\s+welcome)|(good\s+(morning|afternoon|evening|night))|(how\s+are\s+you)|(how'?s\s+it\s+going)|bye|goodbye|cya|ttyl|(take\s+care)|(see\s+you))[.!?~]*\s*$/i;
+
+/**
+ * Returns true when the input is clearly a conversational message that needs
+ * no tools and no planning — greetings, acks, small talk, etc.
+ */
+export function isConversational(input: string): boolean {
+  const t = input.trim();
+  if (t.length === 0) return true;
+  return CONVERSATIONAL_RE.test(t);
+}
 
 /**
  * Returns the names of tools relevant to this query.

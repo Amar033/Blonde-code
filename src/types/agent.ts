@@ -11,7 +11,20 @@ export interface Plan {
 }
 
 
-// observation result from executing a tool 
+// What kind of result an observation carries.
+// The agent loop uses this to add targeted directives to the next prompt —
+// e.g. type_error gets "fix these before continuing", test_failure gets "tests are broken".
+export type ObservationKind =
+  | 'file_read'       // read_file, list_files, file_tree, glob, grep
+  | 'file_write'      // write_file, edit_file, replace_block
+  | 'shell_output'    // bash
+  | 'search_result'   // web_search, web_fetch, search_codebase
+  | 'git_result'      // git_status, git_diff, git_log, git_add, git_commit, git_branch, git_stash
+  | 'type_error'      // tsc diagnostic injected after a TS file edit
+  | 'test_failure'    // future: test runner output with failures
+  | 'error';          // tool execution error or unknown failure
+
+// observation result from executing a tool
 export interface Observation {
   toolName: string;
   input: Record<string, unknown>;
@@ -19,6 +32,7 @@ export interface Observation {
   summary: string;
   timestamp: Date;
   success: boolean;
+  kind: ObservationKind;
 }
 
 // tool call - Request for a tool call (from the llm)

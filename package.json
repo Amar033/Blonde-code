@@ -4,12 +4,22 @@
   "description": "Hand-built AI coding agent runtime",
   "main": "dist/main.js",
   "type": "module",
+  "bin": {
+    "blonde": "src/ui/run.tsx"
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/main.ts",
     "start": "node dist/main.js",
     "tui": "tsx src/ui/run-tui.tsx",
-    "agent": "tsx src/ui/run.tsx"
+    "agent": "bun src/ui/run.tsx",
+    "compile": "bun build --compile --target=bun-linux-x64 --outfile=blonde-linux-x64 src/ui/run.tsx",
+    "compile:linux-x64":   "bun build --compile --target=bun-linux-x64   --outfile=dist/blonde-linux-x64   src/ui/run.tsx",
+    "compile:linux-arm64": "bun build --compile --target=bun-linux-arm64  --outfile=dist/blonde-linux-arm64  src/ui/run.tsx",
+    "compile:darwin-x64":  "bun build --compile --target=bun-darwin-x64  --outfile=dist/blonde-darwin-x64  src/ui/run.tsx",
+    "compile:darwin-arm64":"bun build --compile --target=bun-darwin-arm64 --outfile=dist/blonde-darwin-arm64 src/ui/run.tsx",
+    "compile:windows":     "bun build --compile --target=bun-windows-x64  --outfile=dist/blonde-windows-x64.exe src/ui/run.tsx",
+    "compile:all": "mkdir -p dist && npm run compile:linux-x64 && npm run compile:linux-arm64 && npm run compile:darwin-x64 && npm run compile:darwin-arm64 && npm run compile:windows"
   },
   "keywords": [
     "agent",
@@ -26,7 +36,11 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "@types/react": "^19.2.14",
+    "@mozilla/readability": "^0.6.0",
+    "@opentui/core": "^0.4.1",
+    "@opentui/react": "^0.4.1",
+    "@types/react": "^18.3.18",
+    "@types/turndown": "^5.0.6",
     "dotenv": "^17.2.3",
     "ink": "^6.7.0",
     "ink-big-text": "^2.0.0",
@@ -34,10 +48,12 @@
     "ink-gradient": "^4.0.0",
     "ink-spinner": "^5.0.0",
     "ink-text-input": "^6.0.0",
+    "linkedom": "^0.18.12",
     "ollama": "^0.6.3",
     "openai": "^6.17.0",
     "react": "^19.2.4",
     "terminal-image": "^4.2.0",
+    "turndown": "^7.2.4",
     "zod": "^4.3.6"
   }
 }

@@ -1,6 +1,7 @@
 import { promises as fs } from 'fs';
-import { basename, dirname } from 'path';
+import { basename, dirname, resolve } from 'path';
 import { BaseTool, ToolResult, FakeRunResult } from './base.js';
+import type { ToolConfig } from './base.js';
 
 export class WriteFileTool extends BaseTool {
   name = 'write_file';
@@ -23,6 +24,8 @@ export class WriteFileTool extends BaseTool {
 
   isDangerous = false;
   requiresApproval = false;
+
+  constructor(config: ToolConfig) { super(config); }
 
   private blockedPaths = [
     'node_modules',
@@ -62,8 +65,9 @@ export class WriteFileTool extends BaseTool {
   async execute(args: unknown): Promise<ToolResult> {
     const startTime = Date.now();
     const { path, content } = args as { path: string; content: string };
+    const resolved = resolve(this.config.workspacePath, path);
 
-    if (this.isBlockedPath(path)) {
+    if (this.isBlockedPath(resolved)) {
       return {
         success: false,
         output: null,
@@ -72,12 +76,12 @@ export class WriteFileTool extends BaseTool {
     }
 
     try {
-      const dir = dirname(path);
+      const dir = dirname(resolved);
       if (dir && dir !== '.') {
         await fs.mkdir(dir, { recursive: true });
       }
 
-      await fs.writeFile(path, content, 'utf-8');
+      await fs.writeFile(resolved, content, 'utf-8');
 
       const lines = content.split('\n').length;
       const duration = Date.now() - startTime;

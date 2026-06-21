@@ -1,0 +1,115 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: bun-linux-x64
+            asset:  blonde-linux-x64
+          - target: bun-linux-arm64
+            asset:  blonde-linux-arm64
+          - target: bun-darwin-x64
+            asset:  blonde-darwin-x64
+          - target: bun-darwin-arm64
+            asset:  blonde-darwin-arm64
+          - target: bun-windows-x64
+            asset:  blonde-windows-x64.exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Inject version into src/version.ts
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION_CLEAN="${VERSION#v}"   # strip leading "v"
+          sed -i "s/export const VERSION = '.*';/export const VERSION = '${VERSION_CLEAN}';/" src/version.ts
+
+      - name: Build ${{ matrix.asset }}
+        run: |
+          bun build --compile \
+            --target=${{ matrix.target }} \
+            --outfile=${{ matrix.asset }} \
+            src/ui/run.tsx
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum blonde-* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "blonde ${{ github.ref_name }}"
+          body: |
+            ## Install
+
+            **Linux / macOS** (one-liner):
+            ```bash
+            curl -fsSL https://raw.githubusercontent.com/Amar033/Blonde-code/${{ github.ref_name }}/scripts/install.sh | bash
+            ```
+
+            **Manual download:** pick the binary for your platform below, make it executable, and move it to a directory on your `$PATH`.
+
+            | Platform | Binary |
+            |---|---|
+            | Linux x64 | `blonde-linux-x64` |
+            | Linux arm64 | `blonde-linux-arm64` |
+            | macOS Intel | `blonde-darwin-x64` |
+            | macOS Apple Silicon | `blonde-darwin-arm64` |
+            | Windows x64 | `blonde-windows-x64.exe` |
+
+            ## Update
+            If you already have blonde installed:
+            ```bash
+            blonde --update
+            ```
+          files: |
+            dist/blonde-linux-x64
+            dist/blonde-linux-arm64
+            dist/blonde-darwin-x64
+            dist/blonde-darwin-arm64
+            dist/blonde-windows-x64.exe
+            dist/SHA256SUMS.txt
+          draft: false
+          prerelease: false

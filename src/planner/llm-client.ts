@@ -1,9 +1,10 @@
-import type {LLMProvider, LLMCallOptions, LLMStreamDelta} from './providers/base.js';
+import type {LLMProvider, LLMCallOptions, LLMStreamDelta, LLMResponse} from './providers/base.js';
 import type { ConversationTurn } from '../runtime/core.js';
 
-// Chunk yielded by planStream / actStream
+// Chunk yielded by planStream / actStream.
+// `delta` is only the new text from this iteration; `accumulated` is the full response so far.
 export type StreamChunk =
-  | { type: 'token'; content: string; thinking?: string; inThinkBlock: boolean }
+  | { type: 'token'; delta: string; accumulated: string; thinking?: string; inThinkBlock: boolean }
   | { type: 'done';  response: PlannerResponse };
 
 // Extracts <think>...</think> from a partial stream in real time.
@@ -25,10 +26,12 @@ import {OpenRouterProvider} from './providers/openrouter.js';
 import {OllamaProvider, findOllamaModelsDirs} from './providers/ollama.js';
 import {Tool} from '../tools/base.js';
 import type {AgentConfig} from '../agent/agent';
+import {providerRegistry} from './provider-registry.js';
 
 export class LLMClient {
   private provider: LLMProvider;
   private agentConfig?: AgentConfig;
+  private repoMap: string = '';
   // Tracks the prompt token count of the most recent LLM call.
   // We use the latest prompt_eval_count (not a running sum) because each act() call
   // re-sends the entire observation history — so the latest value reflects true context usage.
@@ -38,6 +41,14 @@ export class LLMClient {
   constructor(provider: LLMProvider, agentConfig?: AgentConfig) {
     this.provider = provider;
     this.agentConfig = agentConfig;
+  }
+
+  setRepoMap(map: string): void {
+    this.repoMap = map;
+  }
+
+  callProvider(prompt: string, options?: LLMCallOptions): Promise<LLMResponse> {
+    return this.provider.call(prompt, options);
   }
 
   getTokenUsage(): number {
@@ -58,6 +69,13 @@ export class LLMClient {
   }
 
   static async fromEnv(agentConfig?: AgentConfig): Promise<LLMClient> {
+    // Registry takes precedence over env vars — lets users configure providers from the terminal
+    const active = await providerRegistry.getActive();
+    if (active) {
+      const provider = providerRegistry.createProviderInstance(active);
+      return new LLMClient(provider, agentConfig);
+    }
+
     const providerName = process.env.LLM_PROVIDER || 'ollama';
     const apikey = process.env.OPENROUTER_API_KEY;
     const model = process.env.LLM_MODEL || 'qwen3.5:latest';
@@ -153,12 +171,17 @@ export class LLMClient {
     return `PREVIOUS CONVERSATION (use this to understand references like "that", "it", "again"):\n${lines}\n\n`;
   }
 
+  private buildRepoMapSection(): string {
+    if (!this.repoMap) return '';
+    return `CODEBASE MAP (use this to locate files and symbols — no need to search blindly):\n${this.repoMap}\n\n`;
+  }
+
   private buildPlanPrompt(input: string, history: ConversationTurn[] = []): { prompt: string; systemPrompt: string } {
     return {
       systemPrompt: this.buildSystemPrompt(
         'You are a strategic planning assistant. Analyze the user request and create a high-level plan. Always respond in valid JSON format.'
       ),
-      prompt: `${this.buildHistorySection(history)}Create a step-by-step plan for this task. Make autonomous decisions — do NOT ask the user for clarification.
+      prompt: `${this.buildRepoMapSection()}${this.buildHistorySection(history)}Create a step-by-step plan for this task. Make autonomous decisions — do NOT ask the user for clarification.
 
 UserRequest: ${input}
 
@@ -168,8 +191,13 @@ Rules:
 - ALWAYS respond with type "plan". Never respond with "need_info" or "answer" here.
 - If the request refers to something from the conversation history (e.g. "do that again", "repeat it"), look at the history to understand what to repeat.
 
-Respond ONLY with this JSON (no markdown fences, no extra text):
-{"type":"plan","steps":["step1","step2"],"reasoning":"why this approach","estimatedToolCalls":3}`,
+Decision rules:
+- If the request is purely conversational (greeting, thanks, "how are you", etc.) — respond: {"type":"answer","content":"your short friendly reply"}
+- If the request is a general question answerable without touching files or running code — respond: {"type":"answer","content":"your answer"}
+- For everything else (coding tasks, file edits, debugging, project creation, web search) — respond: {"type":"plan","steps":[...],"reasoning":"...","estimatedToolCalls":N}
+- Never respond with "need_info" here.
+
+Respond ONLY with valid JSON (no markdown fences, no extra text).`,
     };
   }
 
@@ -197,14 +225,33 @@ Respond ONLY with this JSON (no markdown fences, no extra text):
     }
 
     let accumulated = '';
-    for await (const delta of this.provider.stream!(prompt, opts)) {
-      if (delta.type === 'content') {
-        accumulated += delta.content;
+    for await (const chunk of this.provider.stream!(prompt, opts)) {
+      if (chunk.type === 'content') {
+        accumulated += chunk.content;
         const { thinking, inThinkBlock } = extractThinkingLive(accumulated);
-        yield { type: 'token', content: accumulated, thinking, inThinkBlock };
+        yield { type: 'token', delta: chunk.content, accumulated, thinking, inThinkBlock };
       }
     }
     yield { type: 'done', response: this.parseResponse(accumulated) };
+  }
+
+  // Direct conversational reply — no JSON schema, no plan/act loop.
+  // Used for greetings and small talk so the model never hallucinates a plan.
+  async quickReply(userMessage: string, history: ConversationTurn[] = []): Promise<string> {
+    const historySection = this.buildHistorySection(history);
+    const prompt = historySection
+      ? `${historySection}User: ${userMessage}`
+      : userMessage;
+    const response = await this.provider.call(prompt, {
+      mode: 'plan',
+      systemPrompt: this.buildSystemPrompt(
+        'You are Blonde, a helpful coding assistant. The user is sending you a casual greeting or short social message. Reply naturally and briefly in plain text — no JSON, no markdown, no tool calls. Just chat.'
+      ),
+      maxTokens: 120,
+      temperature: 0.8,
+      timeout: 30_000,
+    });
+    return response.content.trim() || 'Hey! What can I help you with?';
   }
 
   async generateSessionName(firstMessage: string): Promise<string> {
@@ -244,11 +291,12 @@ Respond ONLY with this JSON (no markdown fences, no extra text):
       ? `\n⚠️ CRITICAL: You have gathered ${observations.length} observations! STOP calling tools and provide your final answer now.\n` : '';
 
     const historySection = this.buildHistorySection(history);
+    const repoMapSection = this.buildRepoMapSection();
     const prompt = `You are executing a plan to help the user. You have access to these tools:
 
 ${toolDescriptions}
 
-${historySection}USER REQUEST: ${userInput || 'Not provided'}
+${repoMapSection}${historySection}USER REQUEST: ${userInput || 'Not provided'}
 
 CURRENT PLAN:
 ${plan}
@@ -261,6 +309,8 @@ YOUR JOB:
 - Execute the plan step by step using the available tools
 - After each tool result, analyze the result and decide what to do next
 - If you have the answer to the user's request, respond with {"type": "answer", "content": "your answer"}
+  - For RESEARCH / web-search tasks: write a DETAILED, thorough response. Include all key findings, specific facts, names, dates, and quotes. Organize with clear markdown sections (## headers, bullet lists). Do NOT summarize briefly — produce a complete, in-depth answer. Aim for several hundred words if the topic warrants it.
+  - For coding tasks: include the full relevant code, explanation, and any caveats.
 - If you need more info, respond with {"type": "need_info", "question": "what you need"}
 - Otherwise, call another tool or continue with the plan
 
@@ -272,7 +322,7 @@ Respond with ONE of these formats:
 CRITICAL RULES:
 1. Analyze each tool result before calling the next tool — never re-read a file you already read.
 2. EDITING an existing file: use edit_file (find exact text → replace). Do NOT use write_file unless creating a brand-new file.
-3. edit_file requires a non-empty "find" string — the exact text that currently exists in the file. Always read the file first, then copy a unique snippet as "find".
+3. edit_file requires a non-empty "find" string — the exact text that currently exists in the file. Always read the file first, then copy a unique snippet as "find". If the snippet might not be unique or indentation is uncertain, use replace_block instead — it's more tolerant.
 4. When the user says "add a space", "add a line", "change a word" — read the file once, then call edit_file immediately.
 5. When asked to "choose any file" or given a vague instruction: make the choice yourself, do NOT ask.
 6. {"type":"need_info"} is BANNED for choices you can make autonomously. Only use it when the user must supply something you literally cannot guess (e.g. a password or API key).
@@ -294,10 +344,12 @@ ${forceSynthesis ? '10. STOP NOW — provide your final answer immediately.' : '
     userInput?: string, toolCallHistory?: string, forceSynthesis?: boolean, history: ConversationTurn[] = []
   ): Promise<PlannerResponse> {
     const { prompt, systemPrompt } = this.buildActPrompt(plan, observations, availableTools, userInput, toolCallHistory, forceSynthesis, history);
+    const hasWebSearch = observations.some(o => /web.?search|searx|duckduckgo/i.test(o));
+    const maxTokens = forceSynthesis ? 7000 : hasWebSearch && observations.length >= 2 ? 5000 : 3000;
     const response = await this.provider.call(prompt, {
       mode: 'act', systemPrompt,
       temperature: this.getTemperature('act'),
-      maxTokens: 1000,
+      maxTokens,
     });
     this.trackUsage(response);
     return this.parseResponse(response.content);
@@ -309,7 +361,9 @@ ${forceSynthesis ? '10. STOP NOW — provide your final answer immediately.' : '
     userInput?: string, toolCallHistory?: string, forceSynthesis?: boolean, history: ConversationTurn[] = []
   ): AsyncGenerator<StreamChunk> {
     const { prompt, systemPrompt } = this.buildActPrompt(plan, observations, availableTools, userInput, toolCallHistory, forceSynthesis, history);
-    const opts: LLMCallOptions = { mode: 'act', systemPrompt, temperature: this.getTemperature('act'), maxTokens: 1000 };
+    const hasWebSearch = observations.some(o => /web.?search|searx|duckduckgo/i.test(o));
+    const maxTokens = forceSynthesis ? 7000 : hasWebSearch && observations.length >= 2 ? 5000 : 3000;
+    const opts: LLMCallOptions = { mode: 'act', systemPrompt, temperature: this.getTemperature('act'), maxTokens };
 
     if (!this.supportsStreaming()) {
       const res = await this.provider.call(prompt, opts);
@@ -319,11 +373,11 @@ ${forceSynthesis ? '10. STOP NOW — provide your final answer immediately.' : '
     }
 
     let accumulated = '';
-    for await (const delta of this.provider.stream!(prompt, opts)) {
-      if (delta.type === 'content') {
-        accumulated += delta.content;
+    for await (const chunk of this.provider.stream!(prompt, opts)) {
+      if (chunk.type === 'content') {
+        accumulated += chunk.content;
         const { thinking, inThinkBlock } = extractThinkingLive(accumulated);
-        yield { type: 'token', content: accumulated, thinking, inThinkBlock };
+        yield { type: 'token', delta: chunk.content, accumulated, thinking, inThinkBlock };
       }
     }
     yield { type: 'done', response: this.parseResponse(accumulated) };

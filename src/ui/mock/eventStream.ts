@@ -59,6 +59,7 @@ export async function* mockEventStream(): AsyncGenerator<AgentEvent> {
       summary: 'Wrote 1240 bytes to models.py (48 lines)',
       timestamp: new Date(),
       success: true,
+      kind: 'file_write' as const,
     },
   };
   await sleep(300);
@@ -84,6 +85,7 @@ export async function* mockEventStream(): AsyncGenerator<AgentEvent> {
       summary: 'Wrote 980 bytes to routes.py (38 lines)',
       timestamp: new Date(),
       success: true,
+      kind: 'file_write' as const,
     },
   };
   await sleep(300);
@@ -109,6 +111,7 @@ export async function* mockEventStream(): AsyncGenerator<AgentEvent> {
       summary: 'Wrote 320 bytes to main.py (14 lines)',
       timestamp: new Date(),
       success: true,
+      kind: 'file_write' as const,
     },
   };
   await sleep(300);
