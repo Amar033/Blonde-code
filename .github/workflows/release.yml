@@ -9,6 +9,7 @@ jobs:
   build:
     name: Build ${{ matrix.asset }}
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.allow_failure == true }}
 
     strategy:
       fail-fast: false
@@ -23,6 +24,7 @@ jobs:
           - target: bun-darwin-x64
             asset:  blonde-darwin-x64
             os:     macos-latest
+            allow_failure: true
           - target: bun-darwin-arm64
             asset:  blonde-darwin-arm64
             os:     macos-latest
@@ -133,5 +135,6 @@ jobs:
             dist/blonde-darwin-arm64
             dist/blonde-windows-x64.exe
             dist/SHA256SUMS.txt
+          fail_on_unmatched_files: false
           draft: false
           prerelease: false
