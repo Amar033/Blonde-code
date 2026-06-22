@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useTerminalDimensions } from '@opentui/react';
 import { ensureSearXNG } from '../../services/searxng-manager.js';
 import { loadUiConfig } from '../../services/ui-config.js';
+import { providerRegistry } from '../../planner/provider-registry.js';
 import { brandArtFor, getUsername, pickGreeting } from '../brand.js';
 import { theme } from '../theme.js';
 import { FlowerBackground } from '../components/FlowerBackground.js';
@@ -9,13 +10,17 @@ import { checkForUpdate } from '../../services/updater.js';
 
 async function fetchAiGreeting(name: string): Promise<string> {
   try {
-    const baseUrl  = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
-    const model    = process.env.LLM_MODEL        || 'qwen3.5:latest';
-    const provider = process.env.LLM_PROVIDER    || 'ollama';
+    const active   = await providerRegistry.getActive();
+    const provider = active?.type ?? process.env.LLM_PROVIDER;
+    const model    = active?.model ?? process.env.LLM_MODEL;
+
+    if (!provider || !model) return '';
 
     const isOllama = provider === 'ollama';
     const isOpenAI = provider === 'openai' || provider === 'openai-compatible' || provider === 'lmstudio';
     if (!isOllama && !isOpenAI) return '';
+
+    const baseUrl = active?.baseURL ?? process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434';
 
     const ac  = new AbortController();
     const tId = setTimeout(() => ac.abort(), 1200);
@@ -33,10 +38,10 @@ async function fetchAiGreeting(name: string): Promise<string> {
       const data = await res.json() as any;
       return ((data.response as string) || '').trim().replace(/^["']|["']$/g, '').slice(0, 80);
     } else {
-      const apiBase = process.env.OPENAI_API_BASE || process.env.LMSTUDIO_BASE_URL || 'http://localhost:1234/v1';
+      const apiBase = active?.baseURL ?? process.env.OPENAI_API_BASE ?? process.env.LMSTUDIO_BASE_URL ?? 'http://localhost:1234/v1';
       res = await fetch(`${apiBase}/chat/completions`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.OPENAI_API_KEY || 'lm-studio'}` },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.OPENAI_API_KEY ?? 'lm-studio'}` },
         body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], max_tokens: 30, temperature: 0.9 }),
         signal: ac.signal,
       });

@@ -24,6 +24,8 @@ function extractThinkingLive(text: string): { thinking: string; inThinkBlock: bo
 import type {PlannerResponse} from '../types/events.js';
 import {OpenRouterProvider} from './providers/openrouter.js';
 import {OllamaProvider, findOllamaModelsDirs} from './providers/ollama.js';
+import {AnthropicProvider} from './providers/anthropic.js';
+import {OpenAICompatibleProvider} from './providers/openai-compatible.js';
 import {Tool} from '../tools/base.js';
 import type {AgentConfig} from '../agent/agent';
 import {providerRegistry} from './provider-registry.js';
@@ -69,62 +71,83 @@ export class LLMClient {
   }
 
   static async fromEnv(agentConfig?: AgentConfig): Promise<LLMClient> {
-    // Registry takes precedence over env vars — lets users configure providers from the terminal
+    // Registry takes precedence over env vars
     const active = await providerRegistry.getActive();
     if (active) {
-      const provider = providerRegistry.createProviderInstance(active);
-      return new LLMClient(provider, agentConfig);
+      return new LLMClient(providerRegistry.createProviderInstance(active), agentConfig);
     }
 
-    const providerName = process.env.LLM_PROVIDER || 'ollama';
-    const apikey = process.env.OPENROUTER_API_KEY;
-    const model = process.env.LLM_MODEL || 'qwen3.5:latest';
+    const providerName = process.env.LLM_PROVIDER;
+    const model        = process.env.LLM_MODEL;
+
+    if (!providerName) {
+      throw new Error(
+        'No LLM provider configured.\n\n' +
+        'Add one from the chat with /provider add:\n' +
+        '  /provider add claude  anthropic      <ANTHROPIC_API_KEY>  claude-haiku-4-5-20251001\n' +
+        '  /provider add free    openrouter     <OPENROUTER_API_KEY>\n' +
+        '  /provider add local   ollama         -\n\n' +
+        'Or set LLM_PROVIDER in a .env file next to the binary:\n' +
+        '  LLM_PROVIDER=anthropic   ANTHROPIC_API_KEY=sk-ant-...\n' +
+        '  LLM_PROVIDER=openrouter  OPENROUTER_API_KEY=sk-or-...\n' +
+        '  LLM_PROVIDER=ollama      LLM_MODEL=llama3:latest'
+      );
+    }
 
     if (providerName === 'ollama') {
-      const baseURL = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
-      const provider = new OllamaProvider(model, baseURL);
-
+      const baseURL  = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
+      const provider = new OllamaProvider(model || 'llama3:latest', baseURL);
       const available = await provider.isAvailable();
       if (!available) {
-        // Scan for model directories on USB drives / mounted media
         const candidates = await findOllamaModelsDirs();
         if (candidates.length > 0) {
           const best = candidates[0];
-          // Auto-set for this process (only affects Ollama if we also start the server)
           process.env.OLLAMA_MODELS = best.path;
           const locations = candidates.map(c => `  • ${c.path}  (${c.source})`).join('\n');
           throw new Error(
-            `Ollama server is not running.\n` +
-            `Found model directories:\n${locations}\n\n` +
-            `Start Ollama pointing to your models:\n` +
-            `  OLLAMA_MODELS="${best.path}" ollama serve\n\n` +
-            `Or add to your .env:\n` +
-            `  OLLAMA_MODELS=${best.path}`
+            `Ollama server is not running.\nFound model directories:\n${locations}\n\n` +
+            `Start with:  OLLAMA_MODELS="${best.path}" ollama serve`
           );
         }
         throw new Error(
-          'Ollama server is not running.\n' +
-          'Start it with:  ollama serve\n' +
-          'If your models are on a USB drive, start with:\n' +
-          '  OLLAMA_MODELS=/path/to/drive/models ollama serve\n' +
-          'Add OLLAMA_MODELS to your .env file to make it permanent.'
+          'Ollama server is not running. Start it with:  ollama serve\n' +
+          'If your models are on a USB drive:\n' +
+          '  OLLAMA_MODELS=/path/to/drive/models ollama serve'
         );
       }
       return new LLMClient(provider, agentConfig);
     }
 
-    if (!apikey) {
-      throw new Error('OPENROUTER_API_KEY not set in .env');
+    if (providerName === 'anthropic') {
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) throw new Error('LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY is not set in environment');
+      return new LLMClient(new AnthropicProvider(apiKey, model), agentConfig);
     }
 
-    const provider = new OpenRouterProvider(apikey, model);
-
-    const available = await provider.isAvailable();
-    if (!available) {
-      throw new Error(`Provider ${providerName} is not available`);
+    if (providerName === 'openrouter') {
+      const apiKey = process.env.OPENROUTER_API_KEY;
+      if (!apiKey) throw new Error('LLM_PROVIDER=openrouter but OPENROUTER_API_KEY is not set in environment');
+      const provider = new OpenRouterProvider(apiKey, model);
+      if (!await provider.isAvailable()) throw new Error('OpenRouter is not reachable');
+      return new LLMClient(provider, agentConfig);
     }
 
-    return new LLMClient(provider, agentConfig);
+    if (providerName === 'openai') {
+      const apiKey = process.env.OPENAI_API_KEY;
+      if (!apiKey) throw new Error('LLM_PROVIDER=openai but OPENAI_API_KEY is not set in environment');
+      return new LLMClient(new OpenAICompatibleProvider(apiKey, model || 'gpt-4o-mini', 'https://api.openai.com/v1', 'openai'), agentConfig);
+    }
+
+    if (providerName === 'openai-compatible') {
+      const baseURL = process.env.OPENAI_BASE_URL ?? process.env.LM_STUDIO_BASE_URL;
+      if (!baseURL) throw new Error('LLM_PROVIDER=openai-compatible but OPENAI_BASE_URL is not set in environment');
+      const apiKey = process.env.OPENAI_API_KEY ?? '';
+      return new LLMClient(new OpenAICompatibleProvider(apiKey, model || 'default', baseURL, 'openai-compatible'), agentConfig);
+    }
+
+    throw new Error(
+      `Unknown LLM_PROVIDER="${providerName}". Valid values: ollama, anthropic, openrouter, openai, openai-compatible`
+    );
   }
 
   private getTemperature(mode: 'plan' | 'act' | 'finalize'): number {

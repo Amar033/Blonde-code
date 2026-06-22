@@ -200,7 +200,7 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
   const [showHelp,        setShowHelp]        = useState(false);
   const [showPalette,     setShowPalette]     = useState(false);
   const [approvalRequest, setApprovalRequest] = useState<ApprovalRequest | null>(null);
-  const [currentModel,    setCurrentModel]    = useState(process.env.LLM_MODEL || 'qwen3.5:latest');
+  const [currentModel,    setCurrentModel]    = useState(process.env.LLM_MODEL || '');
   const [tokenUsage,      setTokenUsage]      = useState(0);
   const [contextWindow,   setContextWindow]   = useState(8192);
   const [contextWarned,   setContextWarned]   = useState(false);
@@ -308,8 +308,8 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
     mgr.init()
       .then(() => providerRegistry.getActive())
       .then(active => {
-        const activeModel    = active?.model    ?? process.env.LLM_MODEL    ?? 'qwen3.5:latest';
-        const activeProvider = active?.type     ?? process.env.LLM_PROVIDER ?? 'ollama';
+        const activeModel    = active?.model    ?? process.env.LLM_MODEL    ?? '';
+        const activeProvider = active?.type     ?? process.env.LLM_PROVIDER ?? '';
         if (active?.model) setCurrentModel(`${active.model} · ${active.type}:${active.name}`);
 
         if (resumeSession) {
@@ -348,14 +348,19 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
     if (runtimeRef.current) return runtimeRef.current;
     if (!initPromiseRef.current) {
       initPromiseRef.current = (async () => {
-        const reg = new ToolRegistry(workspacePath);
-        const rt  = new AgentRuntime(reg, { maxTurns: 30, maxLoopCount: 20, debug: false, workspacePath });
-        rt.setApprovalCallback(makeApprovalCallback());
-        await rt.initialize();
-        runtimeRef.current = rt;
-        const ctxWin = await rt.getContextWindow();
-        setContextWindow(ctxWin);
-        return rt;
+        try {
+          const reg = new ToolRegistry(workspacePath);
+          const rt  = new AgentRuntime(reg, { maxTurns: 30, maxLoopCount: 20, debug: false, workspacePath });
+          rt.setApprovalCallback(makeApprovalCallback());
+          await rt.initialize();
+          runtimeRef.current = rt;
+          const ctxWin = await rt.getContextWindow();
+          setContextWindow(ctxWin);
+          return rt;
+        } catch (e) {
+          initPromiseRef.current = null; // allow retry after config is fixed
+          throw e;
+        }
       })();
     }
     return initPromiseRef.current;
@@ -522,22 +527,25 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
       setContextWarned(false);
       setTokenUsage(0);
       setTurns(0);
-      sessionMgrRef.current?.create(currentModel, process.env.LLM_PROVIDER ?? 'ollama');
+      sessionMgrRef.current?.create(currentModel, process.env.LLM_PROVIDER ?? '');
       clearAll();
       push({ kind: 'system', text: 'New session started.' });
       return;
     }
     if (val === '/model' || val === '/models') {
-      const providerType = process.env.LLM_PROVIDER || 'ollama';
-      if (providerType === 'ollama') {
-        import('../../planner/providers/ollama.js').then(async ({ OllamaProvider, findOllamaModelsDirs }: any) => {
-          const p = new OllamaProvider(currentModel, process.env.OLLAMA_BASE_URL || 'http://localhost:11434');
-          const [models, dirs] = await Promise.all([p.listModels(), findOllamaModelsDirs()]);
-          push({ kind: 'system', text: `current: ${currentModel}  available: ${models.join(', ')}  dir: ${dirs[0]?.path ?? '~/.ollama/models'}  /model <name> to switch` });
-        }).catch(() => push({ kind: 'system', text: `current: ${currentModel} (${providerType})` }));
-      } else {
-        push({ kind: 'system', text: `current: ${currentModel} (${providerType})` });
-      }
+      providerRegistry.getActive().then(active => {
+        const providerType = active?.type ?? process.env.LLM_PROVIDER ?? '';
+        if (providerType === 'ollama') {
+          import('../../planner/providers/ollama.js').then(async ({ OllamaProvider, findOllamaModelsDirs }: any) => {
+            const baseURL = active?.baseURL ?? process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434';
+            const p = new OllamaProvider(currentModel, baseURL);
+            const [models, dirs] = await Promise.all([p.listModels(), findOllamaModelsDirs()]);
+            push({ kind: 'system', text: `current: ${currentModel}  available: ${models.join(', ')}  dir: ${dirs[0]?.path ?? '~/.ollama/models'}  /model <name> to switch` });
+          }).catch(() => push({ kind: 'system', text: `current: ${currentModel} (ollama)` }));
+        } else {
+          push({ kind: 'system', text: `current: ${currentModel || '(none)'}${providerType ? ` (${providerType})` : ''}` });
+        }
+      });
       return;
     }
     if (val.startsWith('/model ')) {
@@ -545,7 +553,7 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
       if (!m) return;
       push({ kind: 'system', text: `Switching to ${m}…` });
       initRuntime(m).then(() => {
-        sessionMgrRef.current?.create(m, process.env.LLM_PROVIDER ?? 'ollama');
+        sessionMgrRef.current?.create(m, process.env.LLM_PROVIDER ?? '');
         push({ kind: 'system', text: `Model switched to ${m}` });
       }).catch(err => push({ kind: 'system', text: `Failed: ${err}` }));
       return;
