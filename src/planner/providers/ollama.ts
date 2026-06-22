@@ -1,5 +1,10 @@
 import type {LLMProvider, LLMCallOptions, LLMResponse, LLMStreamDelta} from './base.js';
 import { promises as fs } from 'fs';
+
+function makeSignal(options: LLMCallOptions | undefined, defaultMs: number): AbortSignal {
+  const timeout = AbortSignal.timeout(options?.timeout ?? defaultMs);
+  return options?.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
+}
 import { join } from 'path';
 import { homedir } from 'os';
 
@@ -163,7 +168,7 @@ export class OllamaProvider implements LLMProvider {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: requestBody,
-          signal: AbortSignal.timeout(600_000),
+          signal: makeSignal(options, 600_000),
         });
 
         if (!response.ok) {
@@ -239,7 +244,7 @@ export class OllamaProvider implements LLMProvider {
             num_ctx: 8192,
           }
         }),
-        signal: AbortSignal.timeout(options?.timeout ?? 180_000),
+        signal: makeSignal(options, 180_000),
       });
 
       if (!response.ok) {

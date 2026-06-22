@@ -1,5 +1,10 @@
 import type {LLMProvider, LLMCallOptions, LLMResponse} from './base.js';
 
+function makeSignal(options: LLMCallOptions | undefined, defaultMs: number): AbortSignal {
+  const timeout = AbortSignal.timeout(options?.timeout ?? defaultMs);
+  return options?.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
+}
+
 /**
  * Uses open ai sdk (was the initial plan) with openrouter api has free model calls till 100 times a day 
 */
@@ -76,7 +81,7 @@ export class OpenRouterProvider implements LLMProvider{
           temperature: options?.temperature ?? 0.7,
           max_tokens:  options?.maxTokens  ?? 2000,
         }),
-        signal: AbortSignal.timeout(options?.timeout ?? 120_000),
+        signal: makeSignal(options, 120_000),
       });
       if (!response.ok){
         const errorText = await response.text();
