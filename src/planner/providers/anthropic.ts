@@ -1,5 +1,10 @@
 import type { LLMProvider, LLMCallOptions, LLMResponse, LLMStreamDelta } from './base.js';
 
+function makeSignal(options: LLMCallOptions | undefined, defaultMs: number): AbortSignal {
+  const timeout = AbortSignal.timeout(options?.timeout ?? defaultMs);
+  return options?.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
+}
+
 const CONTEXT_WINDOWS: Record<string, number> = {
   'claude-opus-4':      200000,
   'claude-sonnet-4':    200000,
@@ -59,7 +64,7 @@ export class AnthropicProvider implements LLMProvider {
         max_tokens: options?.maxTokens   ?? 2000,
         temperature: options?.temperature ?? 0.7,
       }),
-      signal: AbortSignal.timeout(options?.timeout ?? 180_000),
+      signal: makeSignal(options, 180_000),
     });
 
     if (!res.ok) {
@@ -96,7 +101,7 @@ export class AnthropicProvider implements LLMProvider {
         temperature: options?.temperature ?? 0.7,
         stream: true,
       }),
-      signal: AbortSignal.timeout(options?.timeout ?? 600_000),
+      signal: makeSignal(options, 600_000),
     });
 
     if (!res.ok) {

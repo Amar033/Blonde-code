@@ -1,5 +1,10 @@
 import type { LLMProvider, LLMCallOptions, LLMResponse, LLMStreamDelta } from './base.js';
 
+function makeSignal(options: LLMCallOptions | undefined, defaultMs: number): AbortSignal {
+  const timeout = AbortSignal.timeout(options?.timeout ?? defaultMs);
+  return options?.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
+}
+
 // Context window sizes for common OpenAI models
 const CONTEXT_WINDOWS: Record<string, number> = {
   'gpt-4o':              128000,
@@ -74,7 +79,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
         temperature: options?.temperature ?? 0.7,
         max_tokens:  options?.maxTokens   ?? 2000,
       }),
-      signal: AbortSignal.timeout(options?.timeout ?? 180_000),
+      signal: makeSignal(options, 180_000),
     });
 
     if (!res.ok) {
@@ -111,7 +116,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
         max_tokens:  options?.maxTokens   ?? 2000,
         stream: true,
       }),
-      signal: AbortSignal.timeout(options?.timeout ?? 600_000),
+      signal: makeSignal(options, 600_000),
     });
 
     if (!res.ok) {

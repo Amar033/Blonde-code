@@ -439,7 +439,7 @@ export class AgentRuntime {
 
       // Stream plan tokens so the UI can show live thinking text
       let planResponse = null as import('../types/events.js').PlannerResponse | null;
-      for await (const chunk of this.llmClient!.planStream(input, history)) {
+      for await (const chunk of this.llmClient!.planStream(input, history, signal)) {
         signal.throwIfAborted();
         if (chunk.type === 'token') {
           const ev: AgentEvent = { type: 'llm_streaming', delta: chunk.delta, thinking: chunk.thinking, inThinkBlock: chunk.inThinkBlock };
@@ -593,7 +593,7 @@ export class AgentRuntime {
         let response = null as import('../types/events.js').PlannerResponse | null;
         for await (const chunk of this.llmClient!.actStream(
           planText, observationSummaries, availableTools,
-          userInput, toolCallHistorySummary, forceSynthesis, history
+          userInput, toolCallHistorySummary, forceSynthesis, history, signal
         )) {
           signal.throwIfAborted();
           if (chunk.type === 'token') {
