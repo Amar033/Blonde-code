@@ -22,6 +22,7 @@ export interface LLMCallOptions{
   systemPrompt?: string;
   mode?: 'plan'|'act'|'finalize';
   timeout?: number; // ms — overrides provider default
+  signal?: AbortSignal; // caller-side abort (e.g. Ctrl+C)
 }
 
 // Raw response from llm 

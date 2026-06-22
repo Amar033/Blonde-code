@@ -213,9 +213,9 @@ Respond ONLY with valid JSON (no markdown fences, no extra text).`,
   }
 
   // Streams plan tokens. Yields {type:'token',...} per chunk then {type:'done', response} at end.
-  async *planStream(input: string, history: ConversationTurn[] = []): AsyncGenerator<StreamChunk> {
+  async *planStream(input: string, history: ConversationTurn[] = [], signal?: AbortSignal): AsyncGenerator<StreamChunk> {
     const { prompt, systemPrompt } = this.buildPlanPrompt(input, history);
-    const opts: LLMCallOptions = { mode: 'plan', systemPrompt, temperature: this.getTemperature('plan'), maxTokens: 1500 };
+    const opts: LLMCallOptions = { mode: 'plan', systemPrompt, temperature: this.getTemperature('plan'), maxTokens: 1500, signal };
 
     if (!this.supportsStreaming()) {
       const res = await this.provider.call(prompt, opts);
@@ -358,12 +358,13 @@ ${forceSynthesis ? '10. STOP NOW — provide your final answer immediately.' : '
   // Streams act tokens. Yields {type:'token',...} per chunk then {type:'done', response} at end.
   async *actStream(
     plan: string, observations: string[], availableTools: Tool[],
-    userInput?: string, toolCallHistory?: string, forceSynthesis?: boolean, history: ConversationTurn[] = []
+    userInput?: string, toolCallHistory?: string, forceSynthesis?: boolean, history: ConversationTurn[] = [],
+    signal?: AbortSignal
   ): AsyncGenerator<StreamChunk> {
     const { prompt, systemPrompt } = this.buildActPrompt(plan, observations, availableTools, userInput, toolCallHistory, forceSynthesis, history);
     const hasWebSearch = observations.some(o => /web.?search|searx|duckduckgo/i.test(o));
     const maxTokens = forceSynthesis ? 7000 : hasWebSearch && observations.length >= 2 ? 5000 : 3000;
-    const opts: LLMCallOptions = { mode: 'act', systemPrompt, temperature: this.getTemperature('act'), maxTokens };
+    const opts: LLMCallOptions = { mode: 'act', systemPrompt, temperature: this.getTemperature('act'), maxTokens, signal };
 
     if (!this.supportsStreaming()) {
       const res = await this.provider.call(prompt, opts);
