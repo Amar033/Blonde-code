@@ -780,13 +780,13 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
           title={turns > 0 ? ` Conversation · turn ${turns} ` : ' Conversation '}
           titleColor={theme.text.secondary}
         >
-          {/* Scrollable conversation — sticky bottom, viewport culling */}
+          {/* Scrollable conversation — sticky bottom, no viewport culling (avoids items being culled before layout runs) */}
           <scrollbox
             ref={convScrollRef}
             scrollY={true}
             stickyScroll={true}
             stickyStart="bottom"
-            viewportCulling={true}
+            viewportCulling={false}
             flexGrow={1}
           >
             {completed.map(item => (
@@ -931,6 +931,7 @@ export const UnifiedSession: React.FC<UnifiedSessionProps> = ({
         <input
           ref={inputElRef}
           focused={focus === 'input'}
+          value={input}
           placeholder={inputPlaceholder}
           width={termCols - sideWidth - 12}
           textColor={theme.text.primary}
