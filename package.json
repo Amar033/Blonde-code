@@ -10,7 +10,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/main.ts",
-    "start": "node dist/main.js",
+    "start": "bun src/ui/run.tsx",
     "tui": "tsx src/ui/run-tui.tsx",
     "agent": "bun src/ui/run.tsx",
     "compile": "bun build --compile --target=bun-linux-x64 --outfile=blonde-linux-x64 src/ui/run.tsx",
