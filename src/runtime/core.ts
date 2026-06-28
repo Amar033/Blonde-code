@@ -13,7 +13,8 @@ import {classifyIntent, isConversational} from '../planner/intent-classifier.js'
 import {repoMapService} from '../services/repo-map.js'
 import {exec} from 'child_process'
 import {promisify} from 'util'
-import {extname} from 'path'
+import {extname, join as pathJoin} from 'path'
+import {existsSync} from 'fs'
 
 const execAsync = promisify(exec);
 // runtime configuration (global configuration for the runtime to prevebnt infinite loops and max iterations)
@@ -218,11 +219,14 @@ export class AgentRuntime {
       this.historyCharLimit = historyTokens * 3;
     }).catch(() => { /* keep default 8000 */ });
 
-    // Build repo map in background — inject into LLMClient once ready
+    // Build repo map in background only when inside a git repo — avoids
+    // blocking the event loop by scanning the user's home directory on first run.
     const root = this.config.workspacePath ?? process.cwd();
-    repoMapService.build(root).then(() => {
-      this.llmClient?.setRepoMap(repoMapService.getFormatted());
-    }).catch(() => { /* non-fatal */ });
+    if (existsSync(pathJoin(root, '.git'))) {
+      repoMapService.build(root).then(() => {
+        this.llmClient?.setRepoMap(repoMapService.getFormatted());
+      }).catch(() => { /* non-fatal */ });
+    }
   }
 
   // Stream LLM response and yield events for each token
