@@ -44,12 +44,6 @@ const FOCUS_CYCLE: FocusTarget[] = ['input', 'conv', 'files', 'tools', 'ctx'];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-// Convert markdown headings (## Foo) to bold (**Foo**) so the markdown renderer
-// shows clean bold text instead of raw # characters, which it can't conceal.
-function fmtMd(text: string): string {
-  return text.replace(/^#{1,6}\s+(.+)$/gm, '**$1**');
-}
-
 function argSummary(name: string, args: Record<string, unknown>): string {
   const v = args.path ?? args.command ?? args.pattern ?? args.query ?? args.url ?? args.find;
   if (v !== undefined) return String(v).slice(0, 50);
@@ -77,7 +71,7 @@ const ItemView = memo(({ item }: { item: CompletedItem }) => {
   if (item.kind === 'plan') {
     const desc = item.first.length > 60 ? item.first.slice(0, 60) + '…' : item.first;
     return (
-      <box marginLeft={2} marginTop={0}>
+      <box marginLeft={2} marginTop={1}>
         <text fg={theme.text.dim}>◦ Planning {item.stepCount} steps — {desc}</text>
       </box>
     );
@@ -85,7 +79,7 @@ const ItemView = memo(({ item }: { item: CompletedItem }) => {
 
   if (item.kind === 'tool' && item.toolName === 'git_diff' && item.success) {
     return (
-      <box flexDirection="column" marginLeft={2} marginTop={0}>
+      <box flexDirection="column" marginLeft={2} marginTop={1}>
         <box>
           <text fg={theme.status.success}>◆ </text>
           <text fg={theme.syntax.keyword}>git_diff</text>
@@ -114,7 +108,7 @@ const ItemView = memo(({ item }: { item: CompletedItem }) => {
     const lines    = rawLines.slice(0, MAX_ROWS).map(l => l.slice(0, MAX_LINE));
     const trunc    = rawLines.length > MAX_ROWS || item.result.length > MAX_LINE * MAX_ROWS;
     return (
-      <box flexDirection="column" marginLeft={2} marginTop={0}>
+      <box flexDirection="column" marginLeft={2} marginTop={1}>
         <box>
           <text fg={ic}>{icon} </text>
           <text fg={theme.syntax.keyword}>{item.toolName}</text>
@@ -139,7 +133,7 @@ const ItemView = memo(({ item }: { item: CompletedItem }) => {
         </box>
         <box paddingLeft={2}>
           <markdown
-            content={fmtMd(item.text)}
+            content={item.text}
             syntaxStyle={mdSyntaxStyle}
             streaming={false}
             conceal={true}

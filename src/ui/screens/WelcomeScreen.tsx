@@ -57,11 +57,10 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
   onShowSessions,
   onShowSettings,
 }) => {
-  const [task,        setTask]        = useState('');
-  const [statusMsg,   setStatusMsg]   = useState('');
-  const [model,       setModel]       = useState(process.env.LLM_MODEL || '');
-  const [provider,    setProvider]    = useState(process.env.LLM_PROVIDER || '');
-  const [hasProvider, setHasProvider] = useState(!!(process.env.LLM_PROVIDER));
+  const [task,      setTask]      = useState('');
+  const [statusMsg, setStatusMsg] = useState('');
+  const [model,     setModel]     = useState(process.env.LLM_MODEL || '');
+  const [provider,  setProvider]  = useState(process.env.LLM_PROVIDER || '');
   const [recent,    setRecent]    = useState<Session[]>([]);
   const [gitBranch]               = useState<string | null>(getGitBranch);
   const [customArt, setCustomArt] = useState<string[] | undefined>();
@@ -81,9 +80,6 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
       if (active) {
         setProvider(`${active.type}:${active.name}`);
         setModel(active.model);
-        setHasProvider(true);
-      } else if (!process.env.LLM_PROVIDER) {
-        setHasProvider(false);
       }
     }).catch(() => {});
 
@@ -312,20 +308,14 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
         </box>
       </Row>
 
-      {/* ── Provider · model (or first-run setup hint) — left-aligned to input box ── */}
+      {/* ── Provider · model — left-aligned to input box ── */}
       <box paddingLeft={leftPad + 1} shouldFill={false}>
-        {hasProvider
-          ? <text fg={theme.text.dim}>{infoLine}</text>
-          : <text fg={theme.status.warning}>{'⚠ no provider — add one with /provider add'}</text>
-        }
+        <text fg={theme.text.dim}>{infoLine}</text>
       </box>
 
       {/* ── Commands hint — left-aligned to input box ── */}
       <box paddingLeft={leftPad + 1} shouldFill={false}>
-        {hasProvider
-          ? <text fg={theme.text.dim}>{'tab  sessions    /settings    /model    /provider    /background off'}</text>
-          : <text fg={theme.text.dim}>{'e.g.  /provider add claude anthropic <API_KEY>    /provider add local ollama -'}</text>
-        }
+        <text fg={theme.text.dim}>{'tab  sessions    /settings    /model    /provider    /background off'}</text>
       </box>
 
       {/* ── NFO sessions box ── */}

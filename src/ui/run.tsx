@@ -3,9 +3,7 @@
 // This is the project root all tools will operate on.
 const workspacePath = process.cwd();
 
-import dotenv from 'dotenv';
-import { join } from 'path';
-import { homedir } from 'os';
+import 'dotenv/config';
 import { createCliRenderer } from '@opentui/core';
 import { createRoot } from '@opentui/react';
 import { appendFileSync } from 'fs';
@@ -13,11 +11,6 @@ import React from 'react';
 import { App } from './App.js';
 import { VERSION } from '../version.js';
 import { checkForUpdate, downloadAndInstall } from '../services/updater.js';
-
-// Load .env from CWD first (dev workflow), then fall back to ~/.blonde/.env
-// so the binary works from any directory, not just the project root.
-dotenv.config();
-dotenv.config({ path: join(homedir(), '.blonde', '.env'), override: false });
 
 // ── Headless CLI flags (handled before TUI starts) ────────────────────────────
 

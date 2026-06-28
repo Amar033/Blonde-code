@@ -87,7 +87,7 @@ export class LLMClient {
         '  /provider add claude  anthropic      <ANTHROPIC_API_KEY>  claude-haiku-4-5-20251001\n' +
         '  /provider add free    openrouter     <OPENROUTER_API_KEY>\n' +
         '  /provider add local   ollama         -\n\n' +
-        'Or create ~/.blonde/.env with:\n' +
+        'Or set LLM_PROVIDER in a .env file next to the binary:\n' +
         '  LLM_PROVIDER=anthropic   ANTHROPIC_API_KEY=sk-ant-...\n' +
         '  LLM_PROVIDER=openrouter  OPENROUTER_API_KEY=sk-or-...\n' +
         '  LLM_PROVIDER=ollama      LLM_MODEL=llama3:latest'
