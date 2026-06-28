@@ -156,7 +156,7 @@ const ItemView = memo(({ item }: { item: CompletedItem }) => {
 
   if (item.kind === 'system') {
     return (
-      <box marginTop={1}>
+      <box flexDirection="row" marginTop={1}>
         <text fg={theme.status.warning}>! </text>
         <text fg={theme.text.secondary}>{item.text}</text>
       </box>

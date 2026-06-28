@@ -37,19 +37,24 @@ export interface RepoMap {
   builtAt: number;
 }
 
+const MAX_FILES = 400;
+const MAX_DEPTH = 6;
+
 // ── File walker ──────────────────────────────────────────────────────────────
 
-function walkDir(dir: string, root: string, out: string[]): void {
+function walkDir(dir: string, root: string, out: string[], depth = 0): void {
+  if (out.length >= MAX_FILES || depth > MAX_DEPTH) return;
   let entries: import('fs').Dirent<string>[];
   try { entries = readdirSync(dir, { withFileTypes: true, encoding: 'utf8' }); }
   catch { return; }
 
   for (const e of entries) {
+    if (out.length >= MAX_FILES) return;
     if (e.name.startsWith('.')) continue;
     if (SKIP_DIRS.has(e.name)) continue;
     const full = join(dir, e.name);
     if (e.isDirectory()) {
-      walkDir(full, root, out);
+      walkDir(full, root, out, depth + 1);
     } else if (e.isFile() && !SKIP_EXTS.has(extname(e.name).toLowerCase())) {
       out.push(full);
     }
